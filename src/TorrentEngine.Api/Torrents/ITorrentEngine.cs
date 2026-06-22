@@ -53,7 +53,9 @@ public interface ITorrentEngine
 
     IReadOnlyList<TorrentSnapshot> GetAllSnapshots();
 
-    IReadOnlyList<TorrentFileInfo> GetFiles(string infoHash);
+    /// <summary>The file list, or <c>null</c> when no torrent with this info hash is registered
+    /// (an empty list means the torrent exists but has no metadata yet).</summary>
+    IReadOnlyList<TorrentFileInfo>? GetFiles(string infoHash);
 
     /// <summary>Raised when a magnet's file list becomes available after metadata download.</summary>
     event EventHandler<string>? MetadataReceived;

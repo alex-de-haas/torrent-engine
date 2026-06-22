@@ -209,8 +209,9 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
                 await manager.StopAsync(TimeSpan.FromSeconds(10));
             }
         }
-        catch (TorrentException exception)
+        catch (Exception exception)
         {
+            // Removal must proceed regardless (ObjectDisposed/InvalidOperation/Canceled etc.).
             _logger.LogWarning(exception, "Stopping torrent {InfoHash} before removal failed; removing anyway.", infoHash);
         }
 
@@ -229,13 +230,23 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     {
         try
         {
-            var fastResumeDir = Path.Combine(_settings.AppDataDir, "torrent-engine", "fastresume");
-            if (!Directory.Exists(fastResumeDir))
+            var engineCache = Path.Combine(_settings.AppDataDir, "torrent-engine");
+            if (!Directory.Exists(engineCache))
             {
                 return;
             }
 
-            foreach (var file in Directory.EnumerateFiles(fastResumeDir, "*.fresume"))
+            // MonoTorrent's fast-resume subdirectory name/casing is not guaranteed across platforms or
+            // versions, so match it case-insensitively (its absence on a case-sensitive Linux FS would
+            // otherwise skip cleanup), and match files by info-hash regardless of extension.
+            var fastResumeDir = Directory.EnumerateDirectories(engineCache)
+                .FirstOrDefault(dir => string.Equals(Path.GetFileName(dir), "fastresume", StringComparison.OrdinalIgnoreCase));
+            if (fastResumeDir is null)
+            {
+                return;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(fastResumeDir))
             {
                 if (string.Equals(Path.GetFileNameWithoutExtension(file), infoHash, StringComparison.OrdinalIgnoreCase))
                 {
@@ -255,10 +266,10 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     public IReadOnlyList<TorrentSnapshot> GetAllSnapshots() =>
         _managers.Select(pair => ToSnapshot(pair.Key, pair.Value)).ToList();
 
-    public IReadOnlyList<TorrentFileInfo> GetFiles(string infoHash) =>
-        _managers.TryGetValue(infoHash, out var manager) && manager.HasMetadata
-            ? MapManagerFiles(manager)
-            : [];
+    public IReadOnlyList<TorrentFileInfo>? GetFiles(string infoHash) =>
+        _managers.TryGetValue(infoHash, out var manager)
+            ? (manager.HasMetadata ? MapManagerFiles(manager) : [])
+            : null;
 
     private async Task WaitForMetadataAsync(string infoHash, TorrentManager manager)
     {

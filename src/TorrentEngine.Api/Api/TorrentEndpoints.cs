@@ -20,6 +20,23 @@ public static class TorrentEndpoints
                 return Results.BadRequest(new { error });
             }
 
+            // Validate the source (and read its info hash) up front so a bad magnet/.torrent is a 400,
+            // and a re-add of an already-registered torrent is a 409, rather than a 500 from the engine.
+            TorrentDescriptor inspected;
+            try
+            {
+                inspected = engine.Inspect(source!);
+            }
+            catch (ArgumentException exception)
+            {
+                return Results.BadRequest(new { error = exception.Message });
+            }
+
+            if (engine.GetSnapshot(inspected.InfoHash) is not null)
+            {
+                return Results.Conflict(new { error = $"Torrent {inspected.InfoHash} is already registered." });
+            }
+
             var saveDirectory = settings.ResolveSaveDirectory(request.SavePath);
             var limits = new TorrentLimits(
                 request.MaxDownloadRate ?? settings.MaxDownloadSpeed,
@@ -35,7 +52,7 @@ public static class TorrentEndpoints
             engine.GetSnapshot(infoHash) is { } snapshot ? Results.Ok(snapshot) : Results.NotFound());
 
         app.MapGet("/downloads/{infoHash}/files", (string infoHash, ITorrentEngine engine) =>
-            Results.Ok(engine.GetFiles(infoHash)));
+            engine.GetFiles(infoHash) is { } files ? Results.Ok(files) : Results.NotFound());
 
         app.MapPost("/downloads/{infoHash}/pause", async (string infoHash, ITorrentEngine engine, CancellationToken ct) =>
         {

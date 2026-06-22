@@ -24,9 +24,17 @@ public sealed class TorrentProgressBroadcaster(
             using var timer = new PeriodicTimer(ProgressInterval);
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                foreach (var snapshot in engine.GetAllSnapshots())
+                try
                 {
-                    stream.Publish(new TorrentEvent("progress", snapshot.InfoHash, snapshot));
+                    foreach (var snapshot in engine.GetAllSnapshots())
+                    {
+                        stream.Publish(new TorrentEvent("progress", snapshot.InfoHash, snapshot));
+                    }
+                }
+                catch (Exception exception)
+                {
+                    // A transient engine error must not kill the broadcast loop forever.
+                    logger.LogError(exception, "Error broadcasting periodic torrent progress.");
                 }
             }
         }
