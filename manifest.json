@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "app.0.1",
+  "id": "com.haas.torrent-engine",
+  "name": "Torrent Engine",
+  "description": "VPN-isolated BitTorrent engine (MonoTorrent) with an HTTP/SSE control API, for other Hosty apps to drive downloads over a dependency.",
+  "version": "0.1.0",
+  "runtimeProfiles": [
+    { "key": "docker", "type": "docker", "default": true }
+  ],
+  "defaultRuntime": "docker",
+  "services": [
+    {
+      "key": "engine",
+      "runtimes": {
+        "docker": {
+          "type": "docker",
+          "image": { "repository": "ghcr.io/alex-de-haas/torrent-engine", "tag": "latest", "pullPolicy": "always" },
+          "capabilities": ["NET_ADMIN"],
+          "devices": ["/dev/net/tun"],
+          "ports": [
+            { "key": "control", "containerPort": 8080, "protocol": "http" }
+          ]
+        }
+      }
+    }
+  ],
+  "endpoints": [
+    { "key": "control", "service": "engine", "port": "control", "protocol": "http" }
+  ],
+  "data": {
+    "enabled": true,
+    "targets": [
+      { "runtime": "docker", "service": "engine", "containerPath": "/app/data", "environment": "HOSTY_APP_DATA_DIR" }
+    ]
+  },
+  "externalMounts": {
+    "downloads": { "kind": "host-path", "multiple": false, "mode": "rw", "service": "engine", "required": true }
+  },
+  "settings": [
+    { "key": "OPENVPN_CONFIG", "type": "string", "secret": true, "required": true },
+    { "key": "OPENVPN_USERNAME", "type": "string", "secret": true },
+    { "key": "OPENVPN_PASSWORD", "type": "string", "secret": true },
+    { "key": "TORRENT_PORT", "type": "number", "default": "6881" },
+    { "key": "TORRENT_MAX_DOWNLOAD_SPEED", "type": "number", "default": "0" },
+    { "key": "TORRENT_MAX_UPLOAD_SPEED", "type": "number", "default": "0" }
+  ],
+  "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
+}

@@ -1,0 +1,13 @@
+# .NET
+bin/
+obj/
+*.user
+
+# OS / editor
+.DS_Store
+.vs/
+.vscode/
+
+# Local secrets / runtime
+*.ovpn
+data/

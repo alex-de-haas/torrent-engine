@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>TorrentEngine.Api</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The engine port from media-server's MonoTorrentEngine will use this. -->
+    <PackageReference Include="MonoTorrent" Version="3.0.2" />
+  </ItemGroup>
+
+</Project>
