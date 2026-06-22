@@ -16,7 +16,7 @@ it here solves two problems at once:
 See the originating design note in media-server:
 `docs/ideas/torrent-engine-app.md`.
 
-## Status: skeleton
+## Status
 
 Implemented:
 - App manifest (`manifest.json`) — docker service with `NET_ADMIN` + `/dev/net/tun`
@@ -26,22 +26,26 @@ Implemented:
 - Container (`Dockerfile` + `docker/entrypoint.sh`) — OpenVPN bring-up with a default-deny
   **killswitch** so torrent traffic can only leave via the tunnel, while the control API
   stays reachable on the docker bridge.
-- Control API stub (`src/TorrentEngine.Api`) — health endpoint and the documented
-  request surface (returns `501` until the engine is ported).
+- **MonoTorrent engine** (`src/TorrentEngine.Api/Torrents`) — ported from media-server,
+  decoupled from its DB/pipeline: DHT/PEX/LSD, protocol encryption, fast-resume/metadata
+  cache, per-torrent limits, runs as a hosted service on the configured `TORRENT_PORT`.
+- **Control API + SSE** (`src/TorrentEngine.Api/Api`, `.../Realtime`) — add/list/inspect/
+  pause/resume/stop/remove downloads, and `GET /events` streaming progress + metadata/
+  completed/errored transitions.
 
 TODO (next chunks):
-- Port MonoTorrent engine + coordinator from media-server (`MonoTorrentEngine.cs`).
-- Implement the control API + SSE event stream against it.
-- Secure cross-app calling (media-server → this app) via Hosty app identity — see
-  Open questions.
-- Wire media-server to consume this app as a dependency and share the downloads mount.
+- Leak-test the killswitch in a real VPN environment.
+- Wire media-server to consume this app as a dependency (docker-host#59) and share the
+  downloads mount so completed files move on one filesystem.
+- Secure cross-app calling — see Open questions (trusted single-tenant: no auth for now).
 
-## Control API (planned)
+## Control API
 
 ```text
-POST   /downloads            { source (magnet|torrent), savePath, limits, keepSeeding } -> { infoHash }
+POST   /downloads            { magnet | torrentBase64, savePath?, maxDownloadRate?, maxUploadRate?, autoStart? } -> descriptor
 GET    /downloads
 GET    /downloads/{infoHash}
+GET    /downloads/{infoHash}/files
 POST   /downloads/{infoHash}/pause|resume|stop
 DELETE /downloads/{infoHash}?deleteFiles=
 GET    /events               (SSE: progress, metadata-received, completed, errored)
