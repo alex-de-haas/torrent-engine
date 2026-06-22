@@ -37,10 +37,24 @@ public static class TorrentEndpoints
                 return Results.Conflict(new { error = $"Torrent {inspected.InfoHash} is already registered." });
             }
 
-            var saveDirectory = settings.ResolveSaveDirectory(request.SavePath);
+            if (request.MaxDownloadRate is < 0 || request.MaxUploadRate is < 0)
+            {
+                return Results.BadRequest(new { error = "maxDownloadRate/maxUploadRate must be >= 0 (0 = unlimited)." });
+            }
+
+            string saveDirectory;
+            try
+            {
+                saveDirectory = settings.ResolveSaveDirectory(request.SavePath);
+            }
+            catch (ArgumentException exception)
+            {
+                return Results.BadRequest(new { error = exception.Message });
+            }
+
             var limits = new TorrentLimits(
-                request.MaxDownloadRate ?? settings.MaxDownloadSpeed,
-                request.MaxUploadRate ?? settings.MaxUploadSpeed);
+                Math.Max(0, request.MaxDownloadRate ?? settings.MaxDownloadSpeed),
+                Math.Max(0, request.MaxUploadRate ?? settings.MaxUploadSpeed));
 
             var descriptor = await engine.AddAsync(source!, saveDirectory, limits, request.AutoStart ?? true, ct);
             return Results.Ok(descriptor);
@@ -72,7 +86,7 @@ public static class TorrentEndpoints
             return Results.NoContent();
         });
 
-        app.MapDelete("/downloads/{infoHash}", async (string infoHash, bool deleteFiles, ITorrentEngine engine, CancellationToken ct) =>
+        app.MapDelete("/downloads/{infoHash}", async (string infoHash, ITorrentEngine engine, CancellationToken ct, bool deleteFiles = false) =>
         {
             await engine.RemoveAsync(infoHash, deleteFiles, ct);
             return Results.NoContent();
@@ -110,17 +124,25 @@ public static class TorrentEndpoints
         source = null;
         error = null;
 
-        if (!string.IsNullOrWhiteSpace(request.Magnet))
+        var hasMagnet = !string.IsNullOrWhiteSpace(request.Magnet);
+        var hasTorrent = !string.IsNullOrWhiteSpace(request.TorrentBase64);
+        if (hasMagnet && hasTorrent)
         {
-            source = new TorrentSource.Magnet(request.Magnet);
+            error = "Provide exactly one of 'magnet' or 'torrentBase64', not both.";
+            return false;
+        }
+
+        if (hasMagnet)
+        {
+            source = new TorrentSource.Magnet(request.Magnet!);
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(request.TorrentBase64))
+        if (hasTorrent)
         {
             try
             {
-                source = new TorrentSource.File(Convert.FromBase64String(request.TorrentBase64), null);
+                source = new TorrentSource.File(Convert.FromBase64String(request.TorrentBase64!), null);
                 return true;
             }
             catch (FormatException)

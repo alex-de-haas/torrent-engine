@@ -50,15 +50,24 @@ public sealed class TorrentEngineSettings
         };
     }
 
-    /// <summary>Resolves a request <c>savePath</c>: absolute paths are used as-is; relative paths are
-    /// taken against <see cref="DownloadsRoot"/>.</summary>
+    /// <summary>Resolves a request <c>savePath</c> against <see cref="DownloadsRoot"/> and guarantees the
+    /// result stays inside it — a traversal like <c>../..</c> (or an absolute path outside the root) is
+    /// rejected with <see cref="ArgumentException"/> so a download can never be written off-mount.</summary>
     public string ResolveSaveDirectory(string? savePath)
     {
+        var root = Path.GetFullPath(DownloadsRoot);
         if (string.IsNullOrWhiteSpace(savePath))
         {
-            return DownloadsRoot;
+            return root;
         }
 
-        return Path.IsPathRooted(savePath) ? savePath : Path.Combine(DownloadsRoot, savePath);
+        var combined = Path.GetFullPath(Path.IsPathRooted(savePath) ? savePath : Path.Combine(root, savePath));
+        var rootPrefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
+        if (!string.Equals(combined, root, StringComparison.Ordinal) && !combined.StartsWith(rootPrefix, StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"savePath '{savePath}' resolves outside the downloads root.", nameof(savePath));
+        }
+
+        return combined;
     }
 }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Sockets;
 using MonoTorrent;
 using MonoTorrent.Client;
 using MonoTorrent.Connections;
@@ -48,11 +49,7 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             AllowedEncryption = [EncryptionType.RC4Header, EncryptionType.RC4Full, EncryptionType.PlainText],
             MaximumDownloadRate = _settings.MaxDownloadSpeed,
             MaximumUploadRate = _settings.MaxUploadSpeed,
-            ListenEndPoints = new Dictionary<string, IPEndPoint>
-            {
-                ["ipv4"] = new IPEndPoint(bindAddress ?? IPAddress.Any, port),
-                ["ipv6"] = new IPEndPoint(IPAddress.IPv6Any, port),
-            },
+            ListenEndPoints = BuildListenEndPoints(bindAddress, port),
             DhtEndPoint = new IPEndPoint(bindAddress ?? IPAddress.Any, port),
         };
 
@@ -361,6 +358,24 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
 
     private static IPAddress? TryParseBindAddress(string? address) =>
         !string.IsNullOrWhiteSpace(address) && IPAddress.TryParse(address, out var parsed) ? parsed : null;
+
+    // With no bind address, listen on all IPv4 + IPv6 interfaces. With one set (e.g. a VPN tun
+    // address), bind ONLY that address's family so the port is not also exposed on every interface
+    // via IPv6Any.
+    private static Dictionary<string, IPEndPoint> BuildListenEndPoints(IPAddress? bindAddress, int port)
+    {
+        if (bindAddress is null)
+        {
+            return new Dictionary<string, IPEndPoint>
+            {
+                ["ipv4"] = new IPEndPoint(IPAddress.Any, port),
+                ["ipv6"] = new IPEndPoint(IPAddress.IPv6Any, port),
+            };
+        }
+
+        var key = bindAddress.AddressFamily == AddressFamily.InterNetworkV6 ? "ipv6" : "ipv4";
+        return new Dictionary<string, IPEndPoint> { [key] = new IPEndPoint(bindAddress, port) };
+    }
 
     private ClientEngine RequireEngine() =>
         _engine ?? throw new InvalidOperationException("Torrent engine has not started.");
