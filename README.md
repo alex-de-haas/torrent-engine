@@ -25,7 +25,10 @@ Implemented:
   port.
 - Container (`Dockerfile` + `docker/entrypoint.sh`) — OpenVPN bring-up with a default-deny
   **killswitch** so torrent traffic can only leave via the tunnel, while the control API
-  stays reachable on the docker bridge.
+  stays reachable on the docker bridge. `OPENVPN_CONFIG` accepts the raw `.ovpn` contents
+  **or** a base64 encoding of them; prefer base64 when setting it through a single-line
+  secret field that would otherwise flatten the newlines OpenVPN requires
+  (`base64 -w0 client.ovpn`, or `base64 -i client.ovpn | tr -d '\n'` on macOS).
 - **MonoTorrent engine** (`src/TorrentEngine.Api/Torrents`) — ported from media-server,
   decoupled from its DB/pipeline: DHT/PEX/LSD, protocol encryption, fast-resume/metadata
   cache, per-torrent limits, runs as a hosted service on the configured `TORRENT_PORT`.
