@@ -27,6 +27,10 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<VpnStatusMonitor>(
 builder.Services.AddSingleton<TorrentEventStream>();
 builder.Services.AddHostedService<TorrentProgressBroadcaster>();
 
+// Pauses downloads while the tunnel is down (and resumes them when it returns), so they don't churn
+// against the killswitch and the UI shows a clean "paused — VPN down" state.
+builder.Services.AddHostedService<VpnDownloadGate>();
+
 var app = builder.Build();
 
 // Liveness — also used by a consumer to gate readiness while the VPN tunnel comes up.
