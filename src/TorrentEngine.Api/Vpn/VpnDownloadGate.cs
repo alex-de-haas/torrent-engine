@@ -42,30 +42,53 @@ public sealed class VpnDownloadGate(
         {
             if (!monitor.GetStatus().Connected)
             {
-                // Tunnel down: pause anything still transferring (incl. torrents added during the outage).
+                // Tunnel down: pause anything still transferring — including torrents added during the
+                // outage, and a torrent the user resumed mid-outage (IsActive catches it again next tick).
                 foreach (var snapshot in engine.GetAllSnapshots())
                 {
-                    if (IsActive(snapshot.EngineState) && _gatedPaused.Add(snapshot.InfoHash))
+                    if (!IsActive(snapshot.EngineState))
+                    {
+                        continue;
+                    }
+
+                    _gatedPaused.Add(snapshot.InfoHash);
+                    try
                     {
                         await engine.PauseAsync(snapshot.InfoHash, cancellationToken);
                         logger.LogInformation("VPN tunnel down — paused {InfoHash}.", snapshot.InfoHash);
                     }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        // One torrent failing to pause must not block the rest.
+                        logger.LogWarning(exception, "Failed to pause {InfoHash} during VPN outage.", snapshot.InfoHash);
+                    }
                 }
             }
-            else if (_gatedPaused.Count > 0)
+            else
             {
                 // Tunnel restored: resume exactly what this gate paused (a removed torrent resumes to a no-op).
                 foreach (var infoHash in _gatedPaused.ToList())
                 {
-                    await engine.ResumeAsync(infoHash, cancellationToken);
-                    logger.LogInformation("VPN tunnel restored — resumed {InfoHash}.", infoHash);
+                    try
+                    {
+                        await engine.ResumeAsync(infoHash, cancellationToken);
+                        logger.LogInformation("VPN tunnel restored — resumed {InfoHash}.", infoHash);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        // Don't let one failure block the others or spin forever — drop it regardless.
+                        logger.LogWarning(exception, "Failed to resume {InfoHash} after VPN restoration.", infoHash);
+                    }
+                    finally
+                    {
+                        _gatedPaused.Remove(infoHash);
+                    }
                 }
-
-                _gatedPaused.Clear();
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            // Guards the enumeration/status calls; per-torrent failures are handled above.
             logger.LogWarning(exception, "VPN download gate reconcile failed.");
         }
     }

@@ -128,8 +128,8 @@ fi
 (
   while true; do
     sleep 10
-    pid="$(cat /run/openvpn.pid 2>/dev/null || true)"
-    if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    # Check the process by name (robust against a stale PID file or PID reuse).
+    if ! pidof openvpn >/dev/null 2>&1; then
       echo "watchdog: openvpn is not running, restarting" >&2
       start_openvpn || echo "watchdog: openvpn restart failed" >&2
     fi
