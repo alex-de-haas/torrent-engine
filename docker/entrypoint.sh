@@ -104,4 +104,17 @@ openvpn --config "$CONFIG_DIR/client.ovpn" $AUTH_ARGS \
 
 wait_for_tunnel
 
+# Route DNS through the tunnel. The host/docker resolver (e.g. Docker Desktop's 192.168.65.7, or any
+# bridge-only address) becomes unreachable once redirect-gateway sends all traffic over tun0, and using
+# it would leak lookups outside the VPN. Point resolv.conf at a tunnel-reachable resolver instead.
+VPN_DNS="${VPN_DNS:-1.1.1.1}"
+if [ -n "$VPN_DNS" ]; then
+  if : > /etc/resolv.conf 2>/dev/null; then
+    for ns in $VPN_DNS; do printf 'nameserver %s\n' "$ns" >> /etc/resolv.conf; done
+    echo "dns: routing lookups through the tunnel via $VPN_DNS"
+  else
+    echo "dns: could not rewrite /etc/resolv.conf (read-only?); lookups may fail" >&2
+  fi
+fi
+
 exec dotnet TorrentEngine.Api.dll

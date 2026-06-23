@@ -44,6 +44,7 @@
     { "key": "TORRENT_MAX_DOWNLOAD_SPEED", "type": "number", "default": "0" },
     { "key": "TORRENT_MAX_UPLOAD_SPEED", "type": "number", "default": "0" },
     { "key": "VPN_INTERFACE", "type": "string", "default": "tun0" },
+    { "key": "VPN_DNS", "type": "string", "default": "1.1.1.1" },
     { "key": "VPN_EXIT_IP_CHECK", "type": "boolean", "default": "true" },
     { "key": "VPN_EXIT_IP_CHECK_URL", "type": "string", "default": "https://ipinfo.io/json" }
   ],

@@ -28,7 +28,10 @@ Implemented:
   stays reachable on the docker bridge. `OPENVPN_CONFIG` accepts the raw `.ovpn` contents
   **or** a base64 encoding of them; prefer base64 when setting it through a single-line
   secret field that would otherwise flatten the newlines OpenVPN requires
-  (`base64 -w0 client.ovpn`, or `base64 -i client.ovpn | tr -d '\n'` on macOS).
+  (`base64 -w0 client.ovpn`, or `base64 -i client.ovpn | tr -d '\n'` on macOS). Once the
+  tunnel is up, DNS is pointed at a tunnel-reachable resolver (`VPN_DNS`, default `1.1.1.1`)
+  so lookups don't leak outside the VPN — and don't break when the host/docker resolver is
+  no longer routable through the tunnel.
 - **MonoTorrent engine** (`src/TorrentEngine.Api/Torrents`) — ported from media-server,
   decoupled from its DB/pipeline: DHT/PEX/LSD, protocol encryption, fast-resume/metadata
   cache, per-torrent limits, runs as a hosted service on the configured `TORRENT_PORT`.
