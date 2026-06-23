@@ -6,6 +6,7 @@
 using TorrentEngine.Api.Api;
 using TorrentEngine.Api.Realtime;
 using TorrentEngine.Api.Torrents;
+using TorrentEngine.Api.Vpn;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +18,12 @@ builder.Services.AddSingleton<MonoTorrentEngine>();
 builder.Services.AddSingleton<ITorrentEngine>(sp => sp.GetRequiredService<MonoTorrentEngine>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonoTorrentEngine>());
 
+// VPN tunnel status: a singleton (resolved by the /vpn endpoint and the broadcaster) that is also a
+// hosted service running the poll loop. The exit-IP check uses the default HttpClient factory.
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<VpnStatusMonitor>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<VpnStatusMonitor>());
+
 builder.Services.AddSingleton<TorrentEventStream>();
 builder.Services.AddHostedService<TorrentProgressBroadcaster>();
 
@@ -24,6 +31,9 @@ var app = builder.Build();
 
 // Liveness — also used by a consumer to gate readiness while the VPN tunnel comes up.
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+
+// Current VPN tunnel status (a consumer seeds this on connect, then receives `vpn` SSE events).
+app.MapGet("/vpn", (VpnStatusMonitor vpn) => Results.Ok(vpn.GetStatus()));
 
 app.MapTorrentEndpoints();
 
