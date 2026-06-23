@@ -71,8 +71,13 @@ public sealed class VpnDownloadGate(
                 {
                     try
                     {
-                        await engine.ResumeAsync(infoHash, cancellationToken);
-                        logger.LogInformation("VPN tunnel restored — resumed {InfoHash}.", infoHash);
+                        // Only resume torrents still in the paused state this gate left them in — respect a
+                        // user stop/remove (or an already-running torrent) made during the outage.
+                        if (engine.GetSnapshot(infoHash) is { EngineState: "Paused" })
+                        {
+                            await engine.ResumeAsync(infoHash, cancellationToken);
+                            logger.LogInformation("VPN tunnel restored — resumed {InfoHash}.", infoHash);
+                        }
                     }
                     catch (Exception exception) when (exception is not OperationCanceledException)
                     {
