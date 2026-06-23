@@ -56,8 +56,9 @@ GET    /healthz
 `GET /vpn` reports the OpenVPN tunnel the engine runs behind: `connected` (tunnel interface up with an
 assigned address) is the primary signal, and `exitIp`/`exitCountry` are a best-effort proof that peer
 traffic egresses through the VPN — a cached outbound check over the tunnel (disable with
-`VPN_EXIT_IP_CHECK=false`, or point it elsewhere with `VPN_EXIT_IP_CHECK_URL`). The same status is
-pushed on the SSE stream as a `vpn` event whenever it changes.
+`VPN_EXIT_IP_CHECK=false`, or point it elsewhere with `VPN_EXIT_IP_CHECK_URL`). The tunnel interface
+watched defaults to `tun0`; override it with `VPN_INTERFACE` if the tunnel comes up under a different
+name. The same status is pushed on the SSE stream as a `vpn` event whenever it changes.
 
 ## Networking model
 

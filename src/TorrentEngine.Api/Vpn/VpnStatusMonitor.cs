@@ -40,13 +40,15 @@ public sealed class VpnStatusMonitor(
     {
         var cached = _current;
         var (connected, iface, address) = ReadTunnel();
+        // Only the tunnel read is live here; the exit IP is reused from the last poll, so report that
+        // poll's timestamp rather than now — CheckedAt must not imply the exit IP was just re-verified.
         return new VpnStatus(
             connected,
             iface,
             address,
             connected ? cached?.ExitIp : null,
             connected ? cached?.ExitCountry : null,
-            DateTimeOffset.UtcNow);
+            cached?.CheckedAt ?? DateTimeOffset.UtcNow);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -81,7 +83,9 @@ public sealed class VpnStatusMonitor(
             {
                 var justConnected = previous is not { Connected: true };
                 var stale = DateTimeOffset.UtcNow - _exitCheckedAt > ExitRefreshInterval;
-                if (justConnected || stale || exitIp is null)
+                // No `exitIp is null` retry: a failed check also stamps _exitCheckedAt, so a failure backs
+                // off for the full ExitRefreshInterval instead of hammering the IP service every poll tick.
+                if (justConnected || stale)
                 {
                     (exitIp, exitCountry) = await FetchExitAsync(cancellationToken);
                     _exitCheckedAt = DateTimeOffset.UtcNow;
@@ -96,9 +100,10 @@ public sealed class VpnStatusMonitor(
                 StatusChanged?.Invoke(this, status);
             }
         }
-        catch (Exception exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // A transient read/fetch error must not kill the monitor loop.
+            // A transient read/fetch error must not kill the monitor loop. Let cancellation (shutdown)
+            // propagate to ExecuteAsync instead of logging it as a failure.
             logger.LogWarning(exception, "Failed to refresh VPN status.");
         }
     }
@@ -169,7 +174,9 @@ public sealed class VpnStatusMonitor(
 
             return IPAddress.TryParse(body, out _) ? (body, null) : (null, null);
         }
-        catch (Exception exception)
+        // Swallow the per-check timeout (the linked CTS firing) and transient errors, but let a genuine
+        // shutdown cancellation propagate rather than masking it as a failed check.
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             logger.LogDebug(exception, "VPN exit-IP check failed via {Url}.", settings.VpnExitCheckUrl);
             return (null, null);
