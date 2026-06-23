@@ -14,11 +14,12 @@ mkdir -p "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR"
 
 : "${OPENVPN_CONFIG:?OPENVPN_CONFIG (the .ovpn contents, raw or base64) is required}"
-# The .ovpn arrives as a Hosty setting. A single-line secret field flattens newlines, which OpenVPN
-# rejects ("Maximum option line length exceeded"). So accept a base64-encoded config (newline-safe) and
-# fall back to the raw contents — a real .ovpn is not valid base64 (spaces, '#', '.'), so the decode
-# attempt only succeeds on actually-encoded input.
-if printf '%s' "$OPENVPN_CONFIG" | base64 -d > "$CONFIG_DIR/client.ovpn" 2>/dev/null \
+# The .ovpn arrives as a Hosty setting. A single-line secret field mangles the newlines OpenVPN needs
+# ("Maximum option line length exceeded"), so we accept a base64 encoding of the config. Strip any
+# whitespace first: such a field also flattens wrapped-base64 line breaks into spaces, which `base64 -d`
+# would otherwise reject. A real .ovpn is not valid base64 (it contains '#', '-', '.'), so the decode
+# only succeeds on actually-encoded input; anything else falls back to the raw contents.
+if printf '%s' "$OPENVPN_CONFIG" | tr -d '[:space:]' | base64 -d > "$CONFIG_DIR/client.ovpn" 2>/dev/null \
   && grep -qiE '^[[:space:]]*(client|remote|proto|dev)[[:space:]]' "$CONFIG_DIR/client.ovpn"; then
   echo "openvpn: using base64-decoded config"
 else
