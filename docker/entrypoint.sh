@@ -38,7 +38,11 @@ if [ -n "${OPENVPN_USERNAME:-}" ]; then
   AUTH_ARGS="--auth-user-pass $CONFIG_DIR/auth.txt"
 fi
 
-CONTROL_PORT="${HOSTY_PORT_CONTROL:-8080}"
+# Port the control API listens on *inside* the container (from ASPNETCORE_URLS / the manifest
+# containerPort). This must be the in-container dport docker forwards to — NOT HOSTY_PORT_CONTROL,
+# which is the host-published port; opening that leaves the killswitch blocking the actual API port.
+CONTROL_PORT="$(printf '%s' "${ASPNETCORE_URLS:-}" | grep -oE ':[0-9]+' | head -1 | tr -d ':')"
+: "${CONTROL_PORT:=8080}"
 
 # Primary (non-tunnel) interface and its subnet — the docker bridge the consumer reaches us on.
 LAN_IF="$(ip route | awk '/^default/ {print $5; exit}')"
