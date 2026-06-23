@@ -26,6 +26,11 @@ else
   printf '%s\n' "$OPENVPN_CONFIG" > "$CONFIG_DIR/client.ovpn"
 fi
 
+# Router-exported .ovpn files are commonly CRLF. Strip the CRs so the killswitch's `remote` parsing
+# below doesn't carry a trailing carriage return into values like the port (iptables: Port "1194\r").
+tr -d '\r' < "$CONFIG_DIR/client.ovpn" > "$CONFIG_DIR/client.ovpn.tmp" \
+  && mv "$CONFIG_DIR/client.ovpn.tmp" "$CONFIG_DIR/client.ovpn"
+
 AUTH_ARGS=""
 if [ -n "${OPENVPN_USERNAME:-}" ]; then
   printf '%s\n%s\n' "$OPENVPN_USERNAME" "${OPENVPN_PASSWORD:-}" > "$CONFIG_DIR/auth.txt"
