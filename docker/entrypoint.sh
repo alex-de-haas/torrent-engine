@@ -97,10 +97,14 @@ wait_for_tunnel() {
   return 1
 }
 
+start_openvpn() {
+  openvpn --config "$CONFIG_DIR/client.ovpn" $AUTH_ARGS \
+    --daemon --writepid /run/openvpn.pid --log /var/log/openvpn.log
+}
+
 apply_killswitch
 
-openvpn --config "$CONFIG_DIR/client.ovpn" $AUTH_ARGS \
-  --daemon --writepid /run/openvpn.pid --log /var/log/openvpn.log
+start_openvpn
 
 wait_for_tunnel
 
@@ -116,5 +120,20 @@ if [ -n "$VPN_DNS" ]; then
     echo "dns: could not rewrite /etc/resolv.conf (read-only?); lookups may fail" >&2
   fi
 fi
+
+# Watchdog: OpenVPN's own keepalive/ping-restart recovers network drops without exiting, so this only
+# covers the rare case where the openvpn process itself dies — restart it so the tunnel (and thus the
+# killswitch's only egress path) comes back instead of staying down until a container restart. Runs in
+# the background; the API stays PID 1 (exec) so it still receives signals for a clean shutdown.
+(
+  while true; do
+    sleep 10
+    # Check the process by name (robust against a stale PID file or PID reuse).
+    if ! pidof openvpn >/dev/null 2>&1; then
+      echo "watchdog: openvpn is not running, restarting" >&2
+      start_openvpn || echo "watchdog: openvpn restart failed" >&2
+    fi
+  done
+) &
 
 exec dotnet TorrentEngine.Api.dll
