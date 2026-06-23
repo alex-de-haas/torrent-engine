@@ -48,9 +48,16 @@ GET    /downloads/{infoHash}
 GET    /downloads/{infoHash}/files
 POST   /downloads/{infoHash}/pause|resume|stop
 DELETE /downloads/{infoHash}?deleteFiles=
-GET    /events               (SSE: progress, metadata-received, completed, errored)
+GET    /events               (SSE: progress, metadata-received, completed, errored, vpn)
+GET    /vpn                  { connected, tunnelInterface, tunnelAddress, exitIp, exitCountry, checkedAt }
 GET    /healthz
 ```
+
+`GET /vpn` reports the OpenVPN tunnel the engine runs behind: `connected` (tunnel interface up with an
+assigned address) is the primary signal, and `exitIp`/`exitCountry` are a best-effort proof that peer
+traffic egresses through the VPN — a cached outbound check over the tunnel (disable with
+`VPN_EXIT_IP_CHECK=false`, or point it elsewhere with `VPN_EXIT_IP_CHECK_URL`). The same status is
+pushed on the SSE stream as a `vpn` event whenever it changes.
 
 ## Networking model
 

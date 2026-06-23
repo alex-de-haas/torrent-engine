@@ -1,12 +1,16 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 using TorrentEngine.Api.Torrents;
+using TorrentEngine.Api.Vpn;
 
 namespace TorrentEngine.Api.Realtime;
 
 /// <summary>One event on the control SSE stream.</summary>
-/// <param name="Type"><c>progress</c> | <c>metadata-received</c> | <c>completed</c> | <c>errored</c>.</param>
-public sealed record TorrentEvent(string Type, string InfoHash, TorrentSnapshot? Snapshot);
+/// <param name="Type"><c>progress</c> | <c>metadata-received</c> | <c>completed</c> | <c>errored</c> | <c>vpn</c>.</param>
+/// <param name="InfoHash">The torrent's info hash; empty for engine-wide events such as <c>vpn</c>.</param>
+/// <param name="Snapshot">Torrent snapshot for per-torrent events; <c>null</c> otherwise.</param>
+/// <param name="Vpn">VPN tunnel status for the <c>vpn</c> event; <c>null</c> otherwise.</param>
+public sealed record TorrentEvent(string Type, string InfoHash, TorrentSnapshot? Snapshot, VpnStatus? Vpn = null);
 
 /// <summary>
 /// Fan-out hub for torrent events: <see cref="TorrentProgressBroadcaster"/> publishes, each

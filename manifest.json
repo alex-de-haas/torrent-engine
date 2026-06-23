@@ -42,7 +42,9 @@
     { "key": "OPENVPN_PASSWORD", "type": "string", "secret": true },
     { "key": "TORRENT_PORT", "type": "number", "default": "6881" },
     { "key": "TORRENT_MAX_DOWNLOAD_SPEED", "type": "number", "default": "0" },
-    { "key": "TORRENT_MAX_UPLOAD_SPEED", "type": "number", "default": "0" }
+    { "key": "TORRENT_MAX_UPLOAD_SPEED", "type": "number", "default": "0" },
+    { "key": "VPN_EXIT_IP_CHECK", "type": "boolean", "default": "true" },
+    { "key": "VPN_EXIT_IP_CHECK_URL", "type": "string", "default": "https://ipinfo.io/json" }
   ],
-  "capabilities": ["open", "update", "restart", "stop", "remove", "backup", "restore", "logs"]
+  "capabilities": ["update", "restart", "stop", "remove", "backup", "restore", "logs"]
 }

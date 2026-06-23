@@ -29,6 +29,18 @@ public sealed class TorrentEngineSettings
 
     public int MaxUploadSpeed { get; init; }
 
+    /// <summary>Name of the VPN tunnel interface the killswitch confines traffic to (see
+    /// <c>docker/entrypoint.sh</c>). Used by the VPN status monitor to detect the tunnel.</summary>
+    public string VpnInterface { get; init; } = "tun0";
+
+    /// <summary>Whether the VPN status monitor performs the best-effort public exit-IP check (an
+    /// outbound request over the tunnel). Disable for fully-local, no-external-call status.</summary>
+    public bool VpnExitCheckEnabled { get; init; } = true;
+
+    /// <summary>Endpoint the exit-IP check calls. A JSON body with <c>ip</c>/<c>country</c> (e.g.
+    /// ipinfo.io) is preferred; a plain-text IP body is also accepted.</summary>
+    public string VpnExitCheckUrl { get; init; } = "https://ipinfo.io/json";
+
     public static TorrentEngineSettings FromConfiguration(IConfiguration configuration, string contentRoot)
     {
         string? Read(string key) => configuration[key] is { Length: > 0 } value ? value.Trim() : null;
@@ -47,6 +59,9 @@ public sealed class TorrentEngineSettings
             EnablePortMapping = ReadBool("TORRENT_ENABLE_PORT_MAPPING", false),
             MaxDownloadSpeed = ReadInt("TORRENT_MAX_DOWNLOAD_SPEED", 0),
             MaxUploadSpeed = ReadInt("TORRENT_MAX_UPLOAD_SPEED", 0),
+            VpnInterface = Read("VPN_INTERFACE") ?? "tun0",
+            VpnExitCheckEnabled = ReadBool("VPN_EXIT_IP_CHECK", true),
+            VpnExitCheckUrl = Read("VPN_EXIT_IP_CHECK_URL") ?? "https://ipinfo.io/json",
         };
     }
 
