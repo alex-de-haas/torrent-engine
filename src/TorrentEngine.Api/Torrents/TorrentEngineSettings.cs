@@ -70,13 +70,15 @@ public sealed class TorrentEngineSettings
 
     /// <summary>Parses <c>HOSTY_MOUNT_DOWNLOADS</c> — a comma-joined list of <c>label=path</c> entries (Core
     /// injects container paths under docker, host paths under localCommand) — into the label→root map. A host
-    /// path may itself contain <c>'='</c>, so each entry is split on the <b>first</b> <c>'='</c> only; an
-    /// entry with no <c>'='</c> (an older Core that injected bare paths) falls back to the path's base name as
-    /// its label. With no mount injected (standalone/dev) a single unlabeled fallback root is used so the
-    /// engine still runs.</summary>
+    /// path may itself contain <c>'='</c>, so each entry is split on the <b>first</b> <c>'='</c> only; an entry
+    /// with no <c>'='</c> (an older Core that injected bare paths) or a blank explicit label falls back to the
+    /// path's base name as its label. Matching is case-insensitive, and an entry that still has no usable label
+    /// (e.g. a bare filesystem root) is skipped rather than stored under an unreachable empty key — Core never
+    /// injects an empty label. With no mount injected (standalone/dev) a single unlabeled fallback root is used
+    /// so the engine still runs.</summary>
     internal static IReadOnlyDictionary<string, string> ParseDownloadsRoots(string? raw, string appDataDir)
     {
-        var roots = new Dictionary<string, string>(StringComparer.Ordinal);
+        var roots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(raw))
         {
             foreach (var entry in raw.Split([',', '\n', '\r', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -88,16 +90,24 @@ public sealed class TorrentEngineSettings
                     continue;
                 }
 
-                var label = separator >= 0
-                    ? entry[..separator].Trim()
-                    : Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                var label = separator >= 0 ? entry[..separator].Trim() : string.Empty;
+                if (label.Length == 0)
+                {
+                    label = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                }
+
+                if (label.Length == 0)
+                {
+                    continue;
+                }
+
                 roots[label] = Path.GetFullPath(path);
             }
         }
 
         if (roots.Count == 0)
         {
-            roots[string.Empty] = Path.Combine(appDataDir, "downloads");
+            roots[string.Empty] = Path.GetFullPath(Path.Combine(appDataDir, "downloads"));
         }
 
         return roots;

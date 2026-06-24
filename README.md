@@ -66,7 +66,9 @@ external mount is `multiple`, so the operator binds one host path per catalog fi
 since Hosty configures each app's mounts independently). The label is required when more than one
 downloads mount is configured and optional when there is exactly one (or for the standalone fallback
 root). An unknown label is a `400` so a download is never written to the wrong filesystem instead of
-silently landing off-mount. the OpenVPN tunnel the engine runs behind: `connected` (tunnel interface up with an
+silently landing off-mount.
+
+`GET /vpn` reports the OpenVPN tunnel the engine runs behind: `connected` (tunnel interface up with an
 assigned address) is the primary signal, and `exitIp`/`exitCountry` are a best-effort proof that peer
 traffic egresses through the VPN — a cached outbound check over the tunnel (disable with
 `VPN_EXIT_IP_CHECK=false`, or point it elsewhere with `VPN_EXIT_IP_CHECK_URL`). The tunnel interface

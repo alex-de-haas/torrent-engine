@@ -58,6 +58,17 @@ public sealed class TorrentEngineSettingsTests
         Assert.Equal(Path.GetFullPath("/srv/downloads/movies"), entry.Value);
     }
 
+    [Fact]
+    public void ParseDownloadsRoots_BlankExplicitLabel_FallsBackToBaseName()
+    {
+        // A malformed `=/path` entry has a blank explicit label; derive it from the base name instead of
+        // storing an unreachable empty key. (Core never injects an empty label.)
+        var roots = TorrentEngineSettings.ParseDownloadsRoots("=/srv/downloads/anime", "/tmp/te");
+
+        var entry = Assert.Single(roots);
+        Assert.Equal("anime", entry.Key);
+    }
+
     // ---- ResolveSaveDirectory ----
 
     [Fact]
@@ -81,6 +92,18 @@ public sealed class TorrentEngineSettingsTests
         var resolved = settings.ResolveSaveDirectory("tv", "Anime/.incoming/abc");
 
         Assert.Equal(Full(tv, "Anime", ".incoming", "abc"), resolved);
+    }
+
+    [Fact]
+    public void ResolveSaveDirectory_MatchesLabelCaseInsensitively()
+    {
+        var movies = Path.Combine(Path.GetTempPath(), "dl", "movies");
+        var tv = Path.Combine(Path.GetTempPath(), "dl", "tv");
+        var settings = WithRoots($"movies={movies},tv={tv}");
+
+        var resolved = settings.ResolveSaveDirectory("MOVIES", ".incoming/abc");
+
+        Assert.Equal(Full(movies, ".incoming", "abc"), resolved);
     }
 
     [Fact]
