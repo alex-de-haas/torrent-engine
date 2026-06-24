@@ -45,7 +45,7 @@ public static class TorrentEndpoints
             string saveDirectory;
             try
             {
-                saveDirectory = settings.ResolveSaveDirectory(request.SavePath);
+                saveDirectory = settings.ResolveSaveDirectory(request.MountLabel, request.SavePath);
             }
             catch (ArgumentException exception)
             {
