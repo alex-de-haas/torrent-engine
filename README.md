@@ -42,13 +42,14 @@ Implemented:
 TODO (next chunks):
 - Leak-test the killswitch in a real VPN environment.
 - Wire media-server to consume this app as a dependency (docker-host#59) and share the
-  downloads mount so completed files move on one filesystem.
+  downloads mounts (one labelled host path per catalog filesystem) so completed files move
+  on one filesystem.
 - Secure cross-app calling — see Open questions (trusted single-tenant: no auth for now).
 
 ## Control API
 
 ```text
-POST   /downloads            { magnet | torrentBase64, savePath?, maxDownloadRate?, maxUploadRate?, autoStart? } -> descriptor
+POST   /downloads            { magnet | torrentBase64, mountLabel?, savePath?, maxDownloadRate?, maxUploadRate?, autoStart? } -> descriptor
 GET    /downloads
 GET    /downloads/{infoHash}
 GET    /downloads/{infoHash}/files
@@ -58,6 +59,14 @@ GET    /events               (SSE: progress, metadata-received, completed, error
 GET    /vpn                  { connected, tunnelInterface, tunnelAddress, exitIp, exitCountry, checkedAt }
 GET    /healthz
 ```
+
+`mountLabel` selects which downloads mount a relative `savePath` resolves against. The `downloads`
+external mount is `multiple`, so the operator binds one host path per catalog filesystem — each with the
+**same label** the consumer uses for the matching catalog root (the only key shared across the two apps,
+since Hosty configures each app's mounts independently). The label is required when more than one
+downloads mount is configured and optional when there is exactly one (or for the standalone fallback
+root). An unknown label is a `400` so a download is never written to the wrong filesystem instead of
+silently landing off-mount.
 
 `GET /vpn` reports the OpenVPN tunnel the engine runs behind: `connected` (tunnel interface up with an
 assigned address) is the primary signal, and `exitIp`/`exitCountry` are a best-effort proof that peer
@@ -85,6 +94,7 @@ shared downloads volume (one filesystem, zero-copy move by the consumer)
   platform notion of an internal cross-app endpoint).
 - **Killswitch hardening:** the iptables rules in `docker/entrypoint.sh` are a first cut
   and need validation in a real VPN environment (leak tests on tunnel drop).
-- **Downloads mount contract:** the consumer configures this app's `downloads` mount to
-  the same host path as its catalog staging dir so the post-download move stays
-  same-filesystem.
+- **Downloads mount contract:** the consumer configures each of this app's `downloads`
+  mounts to the same host path (and the same label) as the matching catalog root so the
+  post-download move stays same-filesystem. The consumer sends that label as `mountLabel`
+  on `POST /downloads`.

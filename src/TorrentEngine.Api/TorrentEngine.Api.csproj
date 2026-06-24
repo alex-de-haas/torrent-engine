@@ -12,4 +12,8 @@
     <PackageReference Include="MonoTorrent" Version="3.0.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TorrentEngine.Api.Tests" />
+  </ItemGroup>
+
 </Project>

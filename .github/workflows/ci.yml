@@ -27,3 +27,6 @@ jobs:
 
       - name: Build
         run: dotnet build src/TorrentEngine.Api/TorrentEngine.Api.csproj --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test src/TorrentEngine.Api.Tests/TorrentEngine.Api.Tests.csproj --configuration Release

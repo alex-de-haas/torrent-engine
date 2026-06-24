@@ -37,7 +37,10 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         var bindAddress = TryParseBindAddress(_settings.BindAddress);
         var cacheDirectory = Path.Combine(_settings.AppDataDir, "torrent-engine");
         Directory.CreateDirectory(cacheDirectory);
-        Directory.CreateDirectory(_settings.DownloadsRoot);
+        foreach (var root in _settings.DownloadsRoots.Values)
+        {
+            Directory.CreateDirectory(root);
+        }
 
         var builder = new EngineSettingsBuilder
         {
