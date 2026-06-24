@@ -4,8 +4,8 @@ A standalone [Hosty](https://github.com/alex-de-haas/docker-host) runtime app: a
 BitTorrent engine (MonoTorrent) that runs **inside an OpenVPN tunnel** and exposes an
 HTTP/SSE **control API** for other Hosty apps to drive downloads over a dependency.
 
-The first consumer is **Media Server**, which today runs the engine in-process. Moving
-it here solves two problems at once:
+The first consumer is **Media Server**, which now delegates **all** downloading to this app
+and no longer ships an in-process engine. Running the engine here solves two problems at once:
 
 1. **VPN-only-for-torrent** — only this container's traffic egresses through the VPN; the
    consumer app (and its HTTP/Jellyfin surface) stays on the direct connection.
@@ -38,13 +38,17 @@ Implemented:
 - **Control API + SSE** (`src/TorrentEngine.Api/Api`, `.../Realtime`) — add/list/inspect/
   pause/resume/stop/remove downloads, and `GET /events` streaming progress + metadata/
   completed/errored transitions.
+- **Multiple downloads mounts** — one labelled host path per catalog filesystem, selected
+  per download by `mountLabel`, so the post-download move stays on one filesystem.
+- **Consumer wiring (Media Server)** — Media Server consumes this app as a **required**
+  cross-app dependency and delegates all downloading to it over the control API + SSE
+  (`RemoteTorrentEngine`); the in-process engine has been removed there. See
+  [Consumer integration](#consumer-integration).
 
 TODO (next chunks):
-- Leak-test the killswitch in a real VPN environment.
-- Wire media-server to consume this app as a dependency (docker-host#59) and share the
-  downloads mounts (one labelled host path per catalog filesystem) so completed files move
-  on one filesystem.
-- Secure cross-app calling — see Open questions (trusted single-tenant: no auth for now).
+- Leak-test the killswitch in a real VPN environment (see Open questions).
+- Secure cross-app calling — the control endpoint is non-public, so today this is a trusted
+  single-tenant deployment with no auth (see Open questions).
 
 ## Control API
 
@@ -75,6 +79,28 @@ traffic egresses through the VPN — a cached outbound check over the tunnel (di
 watched defaults to `tun0`; override it with `VPN_INTERFACE` if the tunnel comes up under a different
 name. The same status is pushed on the SSE stream as a `vpn` event whenever it changes.
 
+## Consumer integration
+
+A Hosty app drives this engine by declaring it as a cross-app dependency and calling the
+control API. Media Server is the reference consumer:
+
+- **Dependency** (consumer manifest) — wire the engine by its `control` endpoint:
+  `"dependencies": [{ "id": "com.haas.torrent-engine", "required": true, "endpoints": [{ "key": "control", "as": "torrent-engine" }] }]`.
+- **Discovery** — Core injects the resolved base URL into the consumer as
+  `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL` (named after the endpoint alias). The consumer
+  points its HTTP client at that value; no address is hard-coded.
+- **Downloads mounts** — the consumer binds each of this app's `downloads` mounts to the
+  **same host path and the same label** as its matching catalog root, then sends that label
+  as `mountLabel` on `POST /downloads`. This keeps the download and the consumer's
+  post-download move on one filesystem (zero-copy). See the label contract under
+  [Control API](#control-api).
+- **Availability** — `required: true` is advisory in Hosty (it raises the severity of the
+  missing-dependency notification; it does **not** block the consumer's start or guarantee
+  the engine is present). A consumer should therefore tolerate the engine being absent:
+  Media Server keeps the rest of its surface (Jellyfin, library, identify/probe/enrich)
+  working and only disables downloading when `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL` is unset.
+  It can also gate readiness on `GET /healthz` / `GET /vpn` while the tunnel comes up.
+
 ## Networking model
 
 ```
@@ -88,13 +114,11 @@ shared downloads volume (one filesystem, zero-copy move by the consumer)
 
 ## Open questions
 
-- **Cross-app auth/routing:** how the consumer reaches this control API securely.
-  Hosty cross-app `dependencies` resolve another app's *public* endpoint; the control
-  API should not be public. Needs the Hosty app-identity token mechanism (and possibly a
-  platform notion of an internal cross-app endpoint).
+- **Cross-app auth/routing:** the consumer is now wired (Media Server declares the
+  dependency and calls the control API), but the `control` endpoint is **non-public** while
+  Hosty cross-app `dependencies` today resolve a *public*, host-reachable endpoint. Reaching
+  a non-public endpoint across containers needs the planned shared cross-app docker network
+  (and, for real multi-tenant use, the Hosty app-identity token mechanism). Until then this
+  assumes a trusted single-tenant deployment.
 - **Killswitch hardening:** the iptables rules in `docker/entrypoint.sh` are a first cut
   and need validation in a real VPN environment (leak tests on tunnel drop).
-- **Downloads mount contract:** the consumer configures each of this app's `downloads`
-  mounts to the same host path (and the same label) as the matching catalog root so the
-  post-download move stays same-filesystem. The consumer sends that label as `mountLabel`
-  on `POST /downloads`.
