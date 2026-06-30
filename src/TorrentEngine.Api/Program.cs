@@ -5,10 +5,15 @@
 
 using TorrentEngine.Api.Api;
 using TorrentEngine.Api.Realtime;
+using TorrentEngine.Api.Telemetry;
 using TorrentEngine.Api.Torrents;
 using TorrentEngine.Api.Vpn;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Export traces/metrics/logs over OTLP to the Hosty collector when Core injects the OTEL_* env
+// (docker runtime + observability enabled); a no-op otherwise. See Telemetry/HostyTelemetry.cs.
+builder.AddHostyTelemetry();
 
 builder.Services.AddSingleton(TorrentEngineSettings.FromConfiguration(builder.Configuration, builder.Environment.ContentRootPath));
 

@@ -112,6 +112,15 @@ consumer app (bridge)  ──HTTP/SSE──►  control API (bridge, control por
 shared downloads volume (one filesystem, zero-copy move by the consumer)
 ```
 
+## Telemetry
+
+The engine instruments itself with OpenTelemetry — ASP.NET Core / `HttpClient` / .NET-runtime traces
+and metrics, plus `ILogger` logs — exported over OTLP/HTTP. Export is **entirely driven by the `OTEL_*`
+environment Hosty Core injects** (`src/TorrentEngine.Api/Telemetry/HostyTelemetry.cs`): when the
+operator has enabled observability and the collector is running, traces/metrics/logs flow to it;
+otherwise — including any non-docker run — the endpoint is absent and the app emits nothing. Opt-in is
+the `telemetry` block in `manifest.json`. See the platform's `docs/features/observability.md`.
+
 ## Open questions
 
 - **Cross-app auth/routing:** the consumer is now wired (Media Server declares the
