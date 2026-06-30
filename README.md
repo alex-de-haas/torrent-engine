@@ -119,7 +119,8 @@ and metrics, plus `ILogger` logs — exported over OTLP/HTTP. Export is **entire
 environment Hosty Core injects** (`src/TorrentEngine.Api/Telemetry/HostyTelemetry.cs`): when the
 operator has enabled observability and the collector is running, traces/metrics/logs flow to it;
 otherwise — including any non-docker run — the endpoint is absent and the app emits nothing. Opt-in is
-the `telemetry` block in `manifest.json`. See the platform's `docs/features/observability.md`.
+the `telemetry` block in `manifest.json`. See `docs/features/observability.md` in the Hosty Core
+platform repo (not this one).
 
 ## Open questions
 
