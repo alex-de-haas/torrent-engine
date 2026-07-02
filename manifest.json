@@ -3,7 +3,7 @@
   "id": "com.haas.torrent-engine",
   "name": "Torrent Engine",
   "description": "VPN-isolated BitTorrent engine (MonoTorrent) with an HTTP/SSE control API, for other Hosty apps to drive downloads over a dependency.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "runtimeProfiles": [
     { "key": "docker", "type": "docker", "default": true }
   ],
