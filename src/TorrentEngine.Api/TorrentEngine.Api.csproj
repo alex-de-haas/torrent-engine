@@ -25,7 +25,11 @@
   <ItemGroup>
     <!-- ClientEngine.SaveStateAsync() serializes EngineSettings reflectively (MonoTorrent's
          Serializer walks its public properties), which the trimmer can't see. Root the assembly so
-         that metadata survives and state persistence keeps working under AOT. -->
+         that metadata survives and state persistence keeps working under AOT.
+         NB: the MonoTorrent 3.0.2 package ships as several assemblies (MonoTorrent.dll,
+         MonoTorrent.Client.dll, MonoTorrent.Dht.dll, ...); MonoTorrent.Client is the distinct
+         assembly that actually defines Serializer + EngineSettings — NOT the MonoTorrent facade
+         assembly — so this is the correct root name. -->
     <TrimmerRootAssembly Include="MonoTorrent.Client" />
   </ItemGroup>
 
