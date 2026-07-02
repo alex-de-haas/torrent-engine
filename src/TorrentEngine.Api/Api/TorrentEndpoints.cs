@@ -9,15 +9,13 @@ namespace TorrentEngine.Api.Api;
 /// returned directly.</summary>
 public static class TorrentEndpoints
 {
-    private static readonly JsonSerializerOptions EventJson = new(JsonSerializerDefaults.Web);
-
     public static void MapTorrentEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapPost("/downloads", async (AddDownloadRequest request, ITorrentEngine engine, TorrentEngineSettings settings, CancellationToken ct) =>
         {
             if (!TryResolveSource(request, out var source, out var error))
             {
-                return Results.BadRequest(new { error });
+                return Results.BadRequest(new ErrorResponse(error!));
             }
 
             // Validate the source (and read its info hash) up front so a bad magnet/.torrent is a 400,
@@ -29,17 +27,17 @@ public static class TorrentEndpoints
             }
             catch (ArgumentException exception)
             {
-                return Results.BadRequest(new { error = exception.Message });
+                return Results.BadRequest(new ErrorResponse(exception.Message));
             }
 
             if (engine.GetSnapshot(inspected.InfoHash) is not null)
             {
-                return Results.Conflict(new { error = $"Torrent {inspected.InfoHash} is already registered." });
+                return Results.Conflict(new ErrorResponse($"Torrent {inspected.InfoHash} is already registered."));
             }
 
             if (request.MaxDownloadRate is < 0 || request.MaxUploadRate is < 0)
             {
-                return Results.BadRequest(new { error = "maxDownloadRate/maxUploadRate must be >= 0 (0 = unlimited)." });
+                return Results.BadRequest(new ErrorResponse("maxDownloadRate/maxUploadRate must be >= 0 (0 = unlimited)."));
             }
 
             string saveDirectory;
@@ -49,7 +47,7 @@ public static class TorrentEndpoints
             }
             catch (ArgumentException exception)
             {
-                return Results.BadRequest(new { error = exception.Message });
+                return Results.BadRequest(new ErrorResponse(exception.Message));
             }
 
             var limits = new TorrentLimits(
@@ -103,7 +101,7 @@ public static class TorrentEndpoints
             {
                 await foreach (var evt in reader.ReadAllAsync(ct))
                 {
-                    var data = JsonSerializer.Serialize(evt, EventJson);
+                    var data = JsonSerializer.Serialize(evt, AppJsonSerializerContext.Default.TorrentEvent);
                     await context.Response.WriteAsync($"event: {evt.Type}\ndata: {data}\n\n", ct);
                     await context.Response.Body.FlushAsync(ct);
                 }

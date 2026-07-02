@@ -11,6 +11,11 @@ using TorrentEngine.Api.Vpn;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Serialize/deserialize through the source-generated context (ahead of the default reflection
+// resolver) so the control API works under Native AOT. See Api/AppJsonSerializerContext.cs.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonSerializerContext.Default));
+
 // Export traces/metrics/logs over OTLP to the Hosty collector when Core injects the OTEL_* env
 // (docker runtime + observability enabled); a no-op otherwise. See Telemetry/HostyTelemetry.cs.
 builder.AddHostyTelemetry();
@@ -39,7 +44,7 @@ builder.Services.AddHostedService<VpnDownloadGate>();
 var app = builder.Build();
 
 // Liveness — also used by a consumer to gate readiness while the VPN tunnel comes up.
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/healthz", () => Results.Ok(new HealthResponse("ok")));
 
 // Current VPN tunnel status (a consumer seeds this on connect, then receives `vpn` SSE events).
 app.MapGet("/vpn", (VpnStatusMonitor vpn) => Results.Ok(vpn.GetStatus()));

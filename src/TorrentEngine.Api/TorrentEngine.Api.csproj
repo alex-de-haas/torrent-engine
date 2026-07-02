@@ -5,6 +5,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>TorrentEngine.Api</RootNamespace>
+
+    <!-- Publish as a native, self-contained binary (no managed runtime). JSON goes through the
+         source-generated AppJsonSerializerContext; the minimal-API request delegates are emitted by
+         the Request Delegate Generator (auto-enabled with PublishAot). See Api/AppJsonSerializerContext.cs. -->
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,6 +20,13 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.16.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.16.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.15.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ClientEngine.SaveStateAsync() serializes EngineSettings reflectively (MonoTorrent's
+         Serializer walks its public properties), which the trimmer can't see. Root the assembly so
+         that metadata survives and state persistence keeps working under AOT. -->
+    <TrimmerRootAssembly Include="MonoTorrent.Client" />
   </ItemGroup>
 
   <ItemGroup>

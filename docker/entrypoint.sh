@@ -136,4 +136,4 @@ fi
   done
 ) &
 
-exec dotnet TorrentEngine.Api.dll
+exec /app/TorrentEngine.Api

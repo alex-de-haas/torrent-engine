@@ -14,3 +14,9 @@ public sealed record AddDownloadRequest(
     int? MaxDownloadRate,
     int? MaxUploadRate,
     bool? AutoStart);
+
+/// <summary>Error envelope returned by the control API (<c>{ "error": "..." }</c>).</summary>
+public sealed record ErrorResponse(string Error);
+
+/// <summary>Body of <c>GET /healthz</c> (<c>{ "status": "ok" }</c>).</summary>
+public sealed record HealthResponse(string Status);
