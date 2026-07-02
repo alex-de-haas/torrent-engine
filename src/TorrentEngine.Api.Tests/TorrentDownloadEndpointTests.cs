@@ -98,7 +98,11 @@ public sealed class TorrentDownloadEndpointTests
         var imposter = ITorrentEngine.Imposter();
         imposter.Inspect(Arg<TorrentSource>.Any()).Returns(Descriptor);
         imposter.GetSnapshot(Arg<string>.Any()).Returns(
-            new TorrentSnapshot("abc123", "Test", "Downloading", false, 0, 0, 0, 0, 0, 100));
+            new TorrentSnapshot(
+                "abc123", "Test", "Downloading", false, 0, 0, 0, 0, 0, 100,
+                Seeds: 0, Leeches: 0, AvailablePeers: 0, DownloadedBytes: 0, UploadedBytes: 0,
+                RemainingBytes: 100, TotalPieces: 0, CompletePieces: 0, PieceLengthBytes: 0,
+                EtaSeconds: null, AddedAt: DateTimeOffset.UnixEpoch, ElapsedSeconds: 0));
 
         var (client, app) = await HostAsync(Settings($"media={Path.Combine(Path.GetTempPath(), "dl", "media")}"), imposter.Instance());
         await using var _ = app;

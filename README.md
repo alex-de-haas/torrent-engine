@@ -72,6 +72,27 @@ downloads mount is configured and optional when there is exactly one (or for the
 root). An unknown label is a `400` so a download is never written to the wrong filesystem instead of
 silently landing off-mount.
 
+The per-torrent snapshot returned by `GET /downloads`, `GET /downloads/{infoHash}`, and the SSE
+`progress` event carries live download stats:
+
+```text
+infoHash, name, engineState, complete, percentComplete,
+downloadRateBytesPerSecond, uploadRateBytesPerSecond, ratio,
+peers,                       // currently connected peer connections
+sizeBytes,
+seeds, leeches,              // connected peers, split by whether they have the whole torrent
+availablePeers,             // known from trackers/DHT/PEX but not connected — high here with few `peers` = a connectivity/port-forwarding issue, not a discovery one
+downloadedBytes, uploadedBytes,   // payload this session (resets on restart; basis for `ratio`)
+remainingBytes,
+totalPieces, completePieces, pieceLengthBytes,
+etaSeconds,                 // null when complete, stalled, or size unknown
+addedAt, elapsedSeconds
+```
+
+The first ten fields are the original contract (unchanged); the rest are additive, so existing
+consumers keep working. `availablePeers` vs `peers` is the quickest read on why a torrent is slow —
+peers discovered but not connectable points at NAT/port-forwarding behind the VPN rather than DHT.
+
 `GET /vpn` reports the OpenVPN tunnel the engine runs behind: `connected` (tunnel interface up with an
 assigned address) is the primary signal, and `exitIp`/`exitCountry` are a best-effort proof that peer
 traffic egresses through the VPN — a cached outbound check over the tunnel (disable with

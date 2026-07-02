@@ -12,7 +12,28 @@ public sealed record TorrentDescriptor(
     bool HasMetadata,
     IReadOnlyList<TorrentFileInfo> Files);
 
-/// <summary>A live, in-memory progress snapshot (never persisted).</summary>
+/// <summary>
+/// A live, in-memory progress snapshot (never persisted). The first ten fields are the original
+/// contract (unchanged names/order for existing consumers); the rest are additive richer stats.
+/// </summary>
+/// <param name="Peers">Currently connected peer connections (<c>OpenConnections</c>).</param>
+/// <param name="SizeBytes">Total content size, or 0 before a magnet's metadata arrives.</param>
+/// <param name="Seeds">Connected peers that have the complete torrent.</param>
+/// <param name="Leeches">Connected peers still downloading.</param>
+/// <param name="AvailablePeers">Peers known from trackers/DHT/PEX but not currently connected — a
+/// high value here with few <see cref="Peers"/> points at a connectivity/NAT (port-forwarding) issue
+/// rather than a discovery one.</param>
+/// <param name="DownloadedBytes">Payload bytes received this session (resets on restart); basis for
+/// <see cref="Ratio"/>, not the same as completed content after a resume.</param>
+/// <param name="UploadedBytes">Payload bytes sent this session.</param>
+/// <param name="RemainingBytes">Content still to download, derived from completion; 0 when complete.</param>
+/// <param name="TotalPieces">Total pieces once metadata is known (0 before).</param>
+/// <param name="CompletePieces">Verified pieces already downloaded.</param>
+/// <param name="PieceLengthBytes">Size of one piece, or 0 before metadata.</param>
+/// <param name="EtaSeconds">Estimated seconds to completion at the current rate; <c>null</c> when
+/// complete, stalled (rate 0), or size unknown.</param>
+/// <param name="AddedAt">When the torrent was added to the engine this session.</param>
+/// <param name="ElapsedSeconds">Seconds since <see cref="AddedAt"/> (server-computed).</param>
 public sealed record TorrentSnapshot(
     string InfoHash,
     string? Name,
@@ -23,7 +44,19 @@ public sealed record TorrentSnapshot(
     long UploadRateBytesPerSecond,
     double Ratio,
     int Peers,
-    long SizeBytes);
+    long SizeBytes,
+    int Seeds,
+    int Leeches,
+    int AvailablePeers,
+    long DownloadedBytes,
+    long UploadedBytes,
+    long RemainingBytes,
+    int TotalPieces,
+    int CompletePieces,
+    long PieceLengthBytes,
+    long? EtaSeconds,
+    DateTimeOffset AddedAt,
+    double ElapsedSeconds);
 
 /// <summary>Per-torrent rate limits (bytes/sec; 0 = unlimited).</summary>
 public sealed record TorrentLimits(int MaxDownloadRate, int MaxUploadRate);

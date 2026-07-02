@@ -18,6 +18,9 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     private readonly ILogger<MonoTorrentEngine> _logger;
     private readonly ConcurrentDictionary<string, TorrentManager> _managers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> _completionRaised = new(StringComparer.OrdinalIgnoreCase);
+    // When each torrent was added this session — feeds the snapshot's AddedAt/ElapsedSeconds. MonoTorrent
+    // does not track this itself, and (like the Monitor's byte counters) it is session-scoped by design.
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _addedAt = new(StringComparer.OrdinalIgnoreCase);
 
     private ClientEngine? _engine;
 
@@ -149,6 +152,7 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         }
 
         _managers[descriptor.InfoHash] = manager;
+        _addedAt[descriptor.InfoHash] = DateTimeOffset.UtcNow;
         manager.TorrentStateChanged += OnTorrentStateChanged;
 
         if (autoStart)
@@ -199,6 +203,7 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         {
             DeleteResumeData(infoHash);
             _completionRaised.TryRemove(infoHash, out _);
+            _addedAt.TryRemove(infoHash, out _);
             return;
         }
 
@@ -221,6 +226,7 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         _managers.TryRemove(infoHash, out _);
         manager.TorrentStateChanged -= OnTorrentStateChanged;
         _completionRaised.TryRemove(infoHash, out _);
+        _addedAt.TryRemove(infoHash, out _);
 
         DeleteResumeData(infoHash);
     }
@@ -261,10 +267,13 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     }
 
     public TorrentSnapshot? GetSnapshot(string infoHash) =>
-        _managers.TryGetValue(infoHash, out var manager) ? ToSnapshot(infoHash, manager) : null;
+        _managers.TryGetValue(infoHash, out var manager) ? ToSnapshot(infoHash, manager, AddedAtOf(infoHash)) : null;
 
     public IReadOnlyList<TorrentSnapshot> GetAllSnapshots() =>
-        _managers.Select(pair => ToSnapshot(pair.Key, pair.Value)).ToList();
+        _managers.Select(pair => ToSnapshot(pair.Key, pair.Value, AddedAtOf(pair.Key))).ToList();
+
+    private DateTimeOffset AddedAtOf(string infoHash) =>
+        _addedAt.TryGetValue(infoHash, out var addedAt) ? addedAt : DateTimeOffset.UtcNow;
 
     public IReadOnlyList<TorrentFileInfo>? GetFiles(string infoHash) =>
         _managers.TryGetValue(infoHash, out var manager)
@@ -309,24 +318,53 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         }
     }
 
-    private static TorrentSnapshot ToSnapshot(string infoHash, TorrentManager manager)
+    private static TorrentSnapshot ToSnapshot(string infoHash, TorrentManager manager, DateTimeOffset addedAt)
     {
-        var downloaded = manager.Monitor.DataBytesReceived;
-        var uploaded = manager.Monitor.DataBytesSent;
+        var monitor = manager.Monitor;
+        var downloaded = monitor.DataBytesReceived;
+        var uploaded = monitor.DataBytesSent;
         var ratio = downloaded > 0 ? Math.Round(uploaded / (double)downloaded, 3) : 0;
         var size = manager.Torrent?.Size ?? manager.MagnetLink?.Size ?? 0;
+
+        // Progress is 0..100 (Bitfield.PercentComplete). Derive remaining content from it rather than from
+        // the session byte counter, which diverges from completed content after a resume.
+        var progress = manager.Progress;
+        var completedBytes = size > 0 ? (long)(size * (progress / 100.0)) : 0;
+        var remaining = Math.Max(0, size - completedBytes);
+
+        var downloadRate = monitor.DownloadRate;
+        long? etaSeconds = !manager.Complete && downloadRate > 0 && remaining > 0
+            ? (long)Math.Ceiling(remaining / (double)downloadRate)
+            : null;
+
+        // Bitfield is a valid (empty) field even before a magnet's metadata arrives; Torrent is null until then.
+        var bitfield = manager.Bitfield;
+        var peers = manager.Peers;
+        var elapsed = Math.Max(0, (DateTimeOffset.UtcNow - addedAt).TotalSeconds);
 
         return new TorrentSnapshot(
             infoHash,
             manager.Name,
             manager.State.ToString(),
             manager.Complete,
-            Math.Round(manager.Progress, 2),
-            manager.Monitor.DownloadRate,
-            manager.Monitor.UploadRate,
+            Math.Round(progress, 2),
+            downloadRate,
+            monitor.UploadRate,
             ratio,
             manager.OpenConnections,
-            size);
+            size,
+            peers.Seeds,
+            peers.Leechs,
+            peers.Available,
+            downloaded,
+            uploaded,
+            remaining,
+            bitfield.Length,
+            bitfield.TrueCount,
+            manager.Torrent?.PieceLength ?? 0,
+            etaSeconds,
+            addedAt,
+            Math.Round(elapsed, 1));
     }
 
     private static IReadOnlyList<TorrentFileInfo> MapManagerFiles(TorrentManager manager)
