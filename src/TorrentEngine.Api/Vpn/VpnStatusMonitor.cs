@@ -193,6 +193,7 @@ public sealed class VpnStatusMonitor(
     private static bool HasChanged(VpnStatus? previous, VpnStatus current) =>
         previous is null
         || previous.Connected != current.Connected
+        || previous.TunnelInterface != current.TunnelInterface
         || previous.TunnelAddress != current.TunnelAddress
         || previous.ExitIp != current.ExitIp
         || previous.ExitCountry != current.ExitCountry;
