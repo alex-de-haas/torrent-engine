@@ -40,7 +40,7 @@ Defaults come from `manifest.json`; the operator sets them through the Hosty She
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `OPENVPN_CONFIG` | — (**required**) | The `.ovpn` contents, raw **or** base64. Prefer base64 for a single-line secret field: `base64 -w0 client.ovpn` (or `base64 -i client.ovpn \| tr -d '\n'` on macOS). |
+| `OPENVPN_CONFIG` | — (**required**) | The `.ovpn` contents, raw **or** base64. Prefer base64 for a single-line secret field: `base64 -w0 client.ovpn` (or <code>base64 -i client.ovpn &#124; tr -d '\n'</code> on macOS). |
 | `OPENVPN_USERNAME` | — | VPN auth username (optional). |
 | `OPENVPN_PASSWORD` | — | VPN auth password (optional). |
 | `VPN_INTERFACE` | `tun0` | Tunnel interface the killswitch confines traffic to and the monitor watches. |
