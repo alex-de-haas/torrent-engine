@@ -13,6 +13,13 @@ and no longer ships an in-process engine. Running the engine here solves two pro
    consumer's bridge networking and port exposure are untouched, and tunnelling all peer
    connections through a single VPN flow sidesteps the docker bridge NAT throttle.
 
+Full documentation lives in [`docs/`](docs/root.md) — start at
+[`docs/root.md`](docs/root.md) for the architecture overview, then the per-subsystem
+feature docs ([control API](docs/features/control-api.md),
+[VPN isolation](docs/features/vpn-isolation.md),
+[downloads mounts](docs/features/downloads-mounts.md),
+[consumer integration](docs/features/consumer-integration.md), and more).
+
 See the originating design note in media-server:
 `docs/ideas/torrent-engine-app.md`.
 
