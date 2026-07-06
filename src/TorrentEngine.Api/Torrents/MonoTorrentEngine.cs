@@ -80,6 +80,13 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             _managers[infoHash] = manager;
             _addedAt.TryAdd(infoHash, DateTimeOffset.UtcNow);
             manager.TorrentStateChanged += OnTorrentStateChanged;
+            // A restored torrent that is already complete will transition into Seeding on resume; mark its
+            // completion as already raised so the restart doesn't re-fire a `completed` event for it.
+            if (manager.Complete)
+            {
+                _completionRaised.TryAdd(infoHash, 0);
+            }
+
             if (!manager.HasMetadata)
             {
                 _ = WaitForMetadataAsync(infoHash, manager);
@@ -229,16 +236,22 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
                 throw new ArgumentOutOfRangeException(nameof(source));
         }
 
-        // Reserve the hash: fail if it is already registered or another add for it is in flight. TryAdd makes
-        // the reservation atomic, so two concurrent adds that both cleared the endpoint's snapshot pre-check
-        // can't both proceed into the engine.
-        if (_managers.ContainsKey(infoHash) || !_registering.TryAdd(infoHash, 0))
+        // Reserve the hash before touching the engine. TryAdd first (atomic), *then* the _managers check —
+        // ordering matters: a torrent that finished registering on another thread populates _managers before
+        // it releases its reservation, so checking _managers only after we hold the reservation closes the
+        // window where both threads could proceed into MonoTorrent's unhandled "already registered" (500).
+        if (!_registering.TryAdd(infoHash, 0))
         {
             throw new DuplicateTorrentException(infoHash);
         }
 
         try
         {
+            if (_managers.ContainsKey(infoHash))
+            {
+                throw new DuplicateTorrentException(infoHash);
+            }
+
             TorrentManager manager;
             TorrentDescriptor descriptor;
             if (magnetLink is not null)
@@ -248,9 +261,11 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             }
             else
             {
-                manager = await engine.AddAsync(torrentFile!, saveDirectory, torrentSettings);
-                descriptor = new TorrentDescriptor(
-                    infoHash, torrentFile!.Name, torrentFile.Size, HasMetadata: true, MapFiles(torrentFile.Files, torrentFile.Name));
+                // Map (and validate) the file list *before* mutating the engine: SafeRelative can reject a
+                // hostile torrent name/path, and it must not leave the torrent registered-but-unreachable.
+                var files = MapFiles(torrentFile!.Files, torrentFile.Name);
+                manager = await engine.AddAsync(torrentFile, saveDirectory, torrentSettings);
+                descriptor = new TorrentDescriptor(infoHash, torrentFile.Name, torrentFile.Size, HasMetadata: true, files);
             }
 
             // Record the add time before exposing the manager, so any snapshot that observes the torrent also
@@ -517,11 +532,15 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     // Normalizes to POSIX separators and rejects any path that is rooted or walks up via a ".." segment.
     // The torrent name (and, for a descriptor, the file paths) is attacker-controlled, so an emitted
     // RelativePath must never lexically escape the save directory when a consumer combines it with its own
-    // root. On-disk placement inside this app is separately guarded by MonoTorrent's own PathValidator.
+    // root. The rooted check is platform-independent (not Path.IsPathRooted, which wouldn't see a Windows
+    // drive path on Linux) so it protects cross-platform consumers regardless of where this app runs.
+    // On-disk placement inside this app is separately guarded by MonoTorrent's own PathValidator.
     private static string SafeRelative(string path)
     {
         var normalized = path.Replace('\\', '/');
-        if (Path.IsPathRooted(normalized) || normalized.Split('/').Any(static segment => segment == ".."))
+        var rooted = normalized.StartsWith('/')
+            || (normalized.Length >= 2 && char.IsAsciiLetter(normalized[0]) && normalized[1] == ':'); // e.g. C:/…
+        if (rooted || normalized.Split('/').Any(static segment => segment == ".."))
         {
             throw new ArgumentException($"Torrent file path '{path}' is not a safe relative path.");
         }

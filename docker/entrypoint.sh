@@ -70,14 +70,16 @@ pin_host() {
   if grep -qiE "[[:space:]]$1([[:space:]]|\$)" /etc/hosts 2>/dev/null; then
     return 0
   fi
+  # Pin every resolved A record (redundancy for reconnects), not just the first.
   for ip in $(resolve_ipv4 "$1"); do
     if printf '%s %s\n' "$ip" "$1" >> /etc/hosts 2>/dev/null; then
       echo "hosts: pinned $1 -> $ip"
     else
       echo "hosts: could not pin $1 (read-only /etc/hosts?)" >&2
+      return 0
     fi
-    return 0
   done
+  return 0
 }
 
 apply_killswitch() {
@@ -132,13 +134,19 @@ allow_collector() {
   hostport="$(printf '%s' "$OTEL_EXPORTER_OTLP_ENDPOINT" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#/.*$##')"
   host="${hostport%%:*}"
   port="${hostport##*:}"
-  case "$port" in ""|"$host") port=4318 ;; esac  # default OTLP http/protobuf port when the URL omits one
+  # Fall back to the default OTLP http/protobuf port unless we parsed a purely-numeric one — a missing or
+  # malformed port must not feed iptables a bad --dport (which, under set -e, would abort the container).
+  case "$port" in ""|"$host"|*[!0-9]*) port=4318 ;; esac
   [ -n "$host" ] || return 0
   pin_host "$host"
+  # Best-effort: a route/rule failure here must not stop the API from starting (telemetry is optional).
   for ip in $(resolve_ipv4 "$host"); do
     ip route add "$ip" via "$LAN_GW" dev "$LAN_IF" 2>/dev/null || true
-    iptables -A OUTPUT -o "$LAN_IF" -p tcp -d "$ip" --dport "$port" -j ACCEPT
-    echo "telemetry: allowed collector $host ($ip:$port) via the bridge"
+    if iptables -A OUTPUT -o "$LAN_IF" -p tcp -d "$ip" --dport "$port" -j ACCEPT 2>/dev/null; then
+      echo "telemetry: allowed collector $host ($ip:$port) via the bridge"
+    else
+      echo "telemetry: could not open the bridge to collector $host ($ip:$port)" >&2
+    fi
   done
 }
 
@@ -149,18 +157,25 @@ apply_ip6_killswitch() {
   command -v ip6tables >/dev/null 2>&1 || { echo "killswitch: ip6tables unavailable; skipping IPv6 rules" >&2; return 0; }
   [ -e /proc/net/if_inet6 ] || { echo "killswitch: no IPv6 stack in container; no IPv6 rules needed"; return 0; }
 
-  ip6tables -F
+  # Fail *closed*: the default-deny policies are the actual leak defense, so set them first and gate on
+  # them — if any won't apply (broken ip6tables), bail before adding ACCEPT rules rather than leaving the
+  # chains at their default-ACCEPT policy. The allow rules below are then best-effort (worst case: v6 is
+  # more restricted than intended, never less). Under set -e the caller invokes this via `|| echo`, so a
+  # non-zero return is logged, not fatal.
+  ip6tables -P INPUT DROP && ip6tables -P OUTPUT DROP && ip6tables -P FORWARD DROP || {
+    echo "killswitch: could not set IPv6 default-deny policy" >&2
+    return 1
+  }
+  ip6tables -F || true
   ip6tables -X 2>/dev/null || true
-  ip6tables -P INPUT DROP
-  ip6tables -P OUTPUT DROP
-  ip6tables -P FORWARD DROP
-  ip6tables -A INPUT -i lo -j ACCEPT
-  ip6tables -A OUTPUT -o lo -j ACCEPT
-  ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  ip6tables -A INPUT -i lo -j ACCEPT || true
+  ip6tables -A OUTPUT -o lo -j ACCEPT || true
+  ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true
+  ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true
   # Allow the tunnel in case it is itself v6-capable; everything else v6 stays dropped.
-  ip6tables -A OUTPUT -o tun0 -j ACCEPT
-  ip6tables -A INPUT -i tun0 -j ACCEPT
+  ip6tables -A OUTPUT -o tun0 -j ACCEPT || true
+  ip6tables -A INPUT -i tun0 -j ACCEPT || true
+  return 0
 }
 
 wait_for_tunnel() {
