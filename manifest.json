@@ -14,7 +14,7 @@
       "runtimes": {
         "docker": {
           "type": "docker",
-          "image": { "repository": "ghcr.io/alex-de-haas/torrent-engine", "tag": "latest", "pullPolicy": "always" },
+          "image": { "repository": "ghcr.io/alex-de-haas/torrent-engine", "tag": "latest" },
           "capabilities": ["NET_ADMIN"],
           "devices": ["/dev/net/tun"],
           "ports": [
@@ -40,9 +40,13 @@
     { "key": "OPENVPN_CONFIG", "type": "string", "secret": true, "required": true },
     { "key": "OPENVPN_USERNAME", "type": "string", "secret": true },
     { "key": "OPENVPN_PASSWORD", "type": "string", "secret": true },
+    { "key": "CONTROL_API_TOKEN", "type": "string", "secret": true },
     { "key": "TORRENT_PORT", "type": "number", "default": "6881" },
+    { "key": "TORRENT_BIND_ADDRESS", "type": "string" },
+    { "key": "TORRENT_ENABLE_PORT_MAPPING", "type": "boolean", "default": "false" },
     { "key": "TORRENT_MAX_DOWNLOAD_SPEED", "type": "number", "default": "0" },
     { "key": "TORRENT_MAX_UPLOAD_SPEED", "type": "number", "default": "0" },
+    { "key": "TORRENT_MAX_ACTIVE", "type": "number", "default": "0" },
     { "key": "VPN_INTERFACE", "type": "string", "default": "tun0" },
     { "key": "VPN_DNS", "type": "string", "default": "1.1.1.1" },
     { "key": "VPN_EXIT_IP_CHECK", "type": "boolean", "default": "true" },

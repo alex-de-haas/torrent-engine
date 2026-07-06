@@ -163,8 +163,11 @@ documented in the relevant feature files.
   consumer, not by end users).
 - Media organization, identification, metadata, or streaming — those belong to the
   consumer (Media Server), not the engine.
-- Persisting download progress or history — snapshots are live and in-memory; only
-  MonoTorrent fast-resume/metadata is persisted so downloads survive a restart.
+- Persisting download progress or history — snapshots are live and in-memory. What
+  *is* persisted (under the app data dir) is the torrent roster plus MonoTorrent
+  fast-resume/metadata, so the downloads themselves survive a restart: on shutdown the
+  engine writes its state, and on startup it restores the roster and resumes each
+  torrent (a metadata-less magnet keeps waiting for metadata).
 - Bundling a VPN provider — the operator supplies their own `.ovpn` config.
 
 ## Summary

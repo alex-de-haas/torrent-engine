@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Threading.Channels;
 using TorrentEngine.Api.Realtime;
 using TorrentEngine.Api.Torrents;
 
@@ -9,6 +10,9 @@ namespace TorrentEngine.Api.Api;
 /// returned directly.</summary>
 public static class TorrentEndpoints
 {
+    /// <summary>How often an otherwise-idle SSE stream emits a keepalive comment.</summary>
+    private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(20);
+
     public static void MapTorrentEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapPost("/downloads", async (AddDownloadRequest request, ITorrentEngine engine, TorrentEngineSettings settings, CancellationToken ct) =>
@@ -20,12 +24,15 @@ public static class TorrentEndpoints
 
             // Validate the source (and read its info hash) up front so a bad magnet/.torrent is a 400,
             // and a re-add of an already-registered torrent is a 409, rather than a 500 from the engine.
+            // Torrent.Load throws TorrentException/BEncodingException on valid-base64/garbage-bencode input;
+            // those are bad input (400), not server faults.
             TorrentDescriptor inspected;
             try
             {
                 inspected = engine.Inspect(source!);
             }
-            catch (ArgumentException exception)
+            catch (Exception exception) when (
+                exception is ArgumentException or MonoTorrent.TorrentException or MonoTorrent.BEncoding.BEncodingException)
             {
                 return Results.BadRequest(new ErrorResponse(exception.Message));
             }
@@ -33,6 +40,12 @@ public static class TorrentEndpoints
             if (engine.GetSnapshot(inspected.InfoHash) is not null)
             {
                 return Results.Conflict(new ErrorResponse($"Torrent {inspected.InfoHash} is already registered."));
+            }
+
+            if (settings.MaxActiveTorrents > 0 && engine.GetAllSnapshots().Count >= settings.MaxActiveTorrents)
+            {
+                return Results.Conflict(new ErrorResponse(
+                    $"Active torrent limit reached ({settings.MaxActiveTorrents}). Remove a download before adding another."));
             }
 
             if (request.MaxDownloadRate is < 0 || request.MaxUploadRate is < 0)
@@ -54,8 +67,16 @@ public static class TorrentEndpoints
                 Math.Max(0, request.MaxDownloadRate ?? settings.MaxDownloadSpeed),
                 Math.Max(0, request.MaxUploadRate ?? settings.MaxUploadSpeed));
 
-            var descriptor = await engine.AddAsync(source!, saveDirectory, limits, request.AutoStart ?? true, ct);
-            return Results.Ok(descriptor);
+            try
+            {
+                var descriptor = await engine.AddAsync(source!, saveDirectory, limits, request.AutoStart ?? true, ct);
+                return Results.Ok(descriptor);
+            }
+            catch (DuplicateTorrentException exception)
+            {
+                // A concurrent add of the same hash raced past the snapshot pre-check above.
+                return Results.Conflict(new ErrorResponse(exception.Message));
+            }
         });
 
         app.MapGet("/downloads", (ITorrentEngine engine) => Results.Ok(engine.GetAllSnapshots()));
@@ -99,8 +120,26 @@ public static class TorrentEndpoints
             var (id, reader) = stream.Subscribe();
             try
             {
-                await foreach (var evt in reader.ReadAllAsync(ct))
+                while (true)
                 {
+                    // Bound each read so an idle stream still emits a keepalive comment every ~20s: a stream
+                    // that sends zero bytes can be silently dropped by intermediary proxies otherwise.
+                    using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    idle.CancelAfter(KeepAliveInterval);
+
+                    TorrentEvent evt;
+                    try
+                    {
+                        evt = await reader.ReadAsync(idle.Token);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        // Idle timeout, not a client disconnect — send an SSE comment to keep the pipe warm.
+                        await context.Response.WriteAsync(": ping\n\n", ct);
+                        await context.Response.Body.FlushAsync(ct);
+                        continue;
+                    }
+
                     var data = JsonSerializer.Serialize(evt, AppJsonSerializerContext.Default.TorrentEvent);
                     await context.Response.WriteAsync($"event: {evt.Type}\ndata: {data}\n\n", ct);
                     await context.Response.Body.FlushAsync(ct);
@@ -109,6 +148,10 @@ public static class TorrentEndpoints
             catch (OperationCanceledException)
             {
                 // Client disconnected.
+            }
+            catch (ChannelClosedException)
+            {
+                // Subscriber channel completed (shutdown/unsubscribe).
             }
             finally
             {

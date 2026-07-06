@@ -1,5 +1,13 @@
 namespace TorrentEngine.Api.Torrents;
 
+/// <summary>Thrown by <see cref="ITorrentEngine.AddAsync"/> when a torrent with the same info hash is
+/// already registered (or an add for it is in flight) — mapped to <c>409 Conflict</c> by the API.</summary>
+public sealed class DuplicateTorrentException(string infoHash)
+    : InvalidOperationException($"Torrent {infoHash} is already registered.")
+{
+    public string InfoHash { get; } = infoHash;
+}
+
 /// <summary>A file inside a torrent, once the file list is known (immediately for <c>.torrent</c>, after
 /// metadata for magnets). <see cref="RelativePath"/> is relative to the torrent's save directory.</summary>
 public sealed record TorrentFileInfo(int Index, string RelativePath, long Length);

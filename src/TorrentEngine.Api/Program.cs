@@ -3,6 +3,8 @@
 // A MonoTorrent engine behind the OpenVPN killswitch (docker/entrypoint.sh) exposed over an
 // HTTP/SSE control API for other Hosty apps to drive downloads. See README.
 
+using System.Security.Cryptography;
+using System.Text;
 using TorrentEngine.Api.Api;
 using TorrentEngine.Api.Realtime;
 using TorrentEngine.Api.Telemetry;
@@ -20,7 +22,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 // (docker runtime + observability enabled); a no-op otherwise. See Telemetry/HostyTelemetry.cs.
 builder.AddHostyTelemetry();
 
-builder.Services.AddSingleton(TorrentEngineSettings.FromConfiguration(builder.Configuration, builder.Environment.ContentRootPath));
+var engineSettings = TorrentEngineSettings.FromConfiguration(builder.Configuration, builder.Environment.ContentRootPath);
+builder.Services.AddSingleton(engineSettings);
 
 // The engine is a single instance that is also the hosted service (starts/stops the ClientEngine)
 // and the ITorrentEngine the API + broadcaster resolve.
@@ -42,6 +45,32 @@ builder.Services.AddHostedService<TorrentProgressBroadcaster>();
 builder.Services.AddHostedService<VpnDownloadGate>();
 
 var app = builder.Build();
+
+// Interim shared-secret auth: when CONTROL_API_TOKEN is set, every request except /healthz must carry it
+// in X-Api-Token. This removes the "anything on the docker bridge can drive the engine" exposure until the
+// platform's app-identity tokens land. Left off (token null/empty) the API stays open, as before.
+if (!string.IsNullOrEmpty(engineSettings.ControlApiToken))
+{
+    var expected = SHA256.HashData(Encoding.UTF8.GetBytes(engineSettings.ControlApiToken));
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/healthz"))
+        {
+            await next();
+            return;
+        }
+
+        var provided = SHA256.HashData(Encoding.UTF8.GetBytes(context.Request.Headers["X-Api-Token"].ToString()));
+        if (!CryptographicOperations.FixedTimeEquals(provided, expected))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsJsonAsync(new ErrorResponse("Missing or invalid X-Api-Token."), AppJsonSerializerContext.Default.ErrorResponse);
+            return;
+        }
+
+        await next();
+    });
+}
 
 // Liveness — also used by a consumer to gate readiness while the VPN tunnel comes up.
 app.MapGet("/healthz", () => Results.Ok(new HealthResponse("ok")));

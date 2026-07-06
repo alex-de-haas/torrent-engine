@@ -54,8 +54,9 @@ Implemented:
 
 TODO (next chunks):
 - Leak-test the killswitch in a real VPN environment (see Open questions).
-- Secure cross-app calling — the control endpoint is non-public, so today this is a trusted
-  single-tenant deployment with no auth (see Open questions).
+- Secure cross-app calling — the control endpoint is non-public; auth is off by default but an
+  interim `CONTROL_API_TOKEN` shared secret (checked via the `X-Api-Token` header) can be set
+  until platform app-identity tokens land (see Open questions).
 
 ## Control API
 
@@ -156,7 +157,9 @@ platform repo (not this one).
   dependency and calls the control API), but the `control` endpoint is **non-public** while
   Hosty cross-app `dependencies` today resolve a *public*, host-reachable endpoint. Reaching
   a non-public endpoint across containers needs the planned shared cross-app docker network
-  (and, for real multi-tenant use, the Hosty app-identity token mechanism). Until then this
-  assumes a trusted single-tenant deployment.
+  (and, for real multi-tenant use, the Hosty app-identity token mechanism). As an interim
+  measure, setting `CONTROL_API_TOKEN` requires every request (except `/healthz`) to present
+  it in an `X-Api-Token` header; left unset the API is open, assuming a trusted single-tenant
+  deployment.
 - **Killswitch hardening:** the iptables rules in `docker/entrypoint.sh` are a first cut
   and need validation in a real VPN environment (leak tests on tunnel drop).

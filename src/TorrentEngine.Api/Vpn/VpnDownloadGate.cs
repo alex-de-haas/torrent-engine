@@ -98,8 +98,10 @@ public sealed class VpnDownloadGate(
         }
     }
 
-    // States that involve (killswitch-blocked) network activity worth pausing. Already-paused/stopped/
-    // errored torrents are left as they are.
+    // States that involve (killswitch-blocked) network activity worth pausing. Hashing is disk-local (no
+    // network), and pausing it lands the torrent in HashingPaused — which the resume path (EngineState:
+    // "Paused") doesn't match, so it would stay paused after recovery. Leave Hashing/HashingPaused alone,
+    // along with already-paused/stopped/errored torrents.
     private static bool IsActive(string state) =>
-        state is not ("Paused" or "Stopped" or "Stopping" or "Error");
+        state is not ("Paused" or "Stopped" or "Stopping" or "Error" or "Hashing" or "HashingPaused");
 }

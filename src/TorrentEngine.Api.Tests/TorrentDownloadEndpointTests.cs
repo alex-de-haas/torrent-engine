@@ -22,6 +22,12 @@ public sealed class TorrentDownloadEndpointTests
 {
     private static readonly TorrentDescriptor Descriptor = new("abc123", "Test", 100, HasMetadata: true, Files: []);
 
+    private static TorrentSnapshot Snapshot(string infoHash, string state) =>
+        new(infoHash, "Test", state, false, 0, 0, 0, 0, 0, 100,
+            Seeds: 0, Leeches: 0, AvailablePeers: 0, DownloadedBytes: 0, UploadedBytes: 0,
+            RemainingBytes: 100, TotalPieces: 0, CompletePieces: 0, PieceLengthBytes: 0,
+            EtaSeconds: null, AddedAt: DateTimeOffset.UnixEpoch, ElapsedSeconds: 0);
+
     private static TorrentEngineSettings Settings(string raw) =>
         new() { AppDataDir = "/tmp/te", DownloadsRoots = TorrentEngineSettings.ParseDownloadsRoots(raw, "/tmp/te") };
 
@@ -93,16 +99,41 @@ public sealed class TorrentDownloadEndpointTests
     }
 
     [Fact]
+    public async Task Post_AtActiveTorrentCap_ReturnsConflict()
+    {
+        var media = Path.Combine(Path.GetTempPath(), "dl", "media");
+        var settings = new TorrentEngineSettings
+        {
+            AppDataDir = "/tmp/te",
+            DownloadsRoots = TorrentEngineSettings.ParseDownloadsRoots($"media={media}", "/tmp/te"),
+            MaxActiveTorrents = 1,
+        };
+
+        var imposter = ITorrentEngine.Imposter();
+        imposter.Inspect(Arg<TorrentSource>.Any()).Returns(Descriptor);
+        imposter.GetSnapshot(Arg<string>.Any()).Returns((TorrentSnapshot)null!); // the new hash is not registered
+        imposter.GetAllSnapshots().Returns(new[] { Snapshot("existing", "Downloading") }); // already at the cap of 1
+
+        var (client, app) = await HostAsync(settings, imposter.Instance());
+        await using var _ = app;
+
+        var response = await client.PostAsJsonAsync("/downloads", new
+        {
+            magnet = "magnet:?xt=urn:btih:abc123",
+            mountLabel = "media",
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ErrorBody>();
+        Assert.Contains("limit", body!.Error);
+    }
+
+    [Fact]
     public async Task Post_AlreadyRegisteredTorrent_ReturnsConflict()
     {
         var imposter = ITorrentEngine.Imposter();
         imposter.Inspect(Arg<TorrentSource>.Any()).Returns(Descriptor);
-        imposter.GetSnapshot(Arg<string>.Any()).Returns(
-            new TorrentSnapshot(
-                "abc123", "Test", "Downloading", false, 0, 0, 0, 0, 0, 100,
-                Seeds: 0, Leeches: 0, AvailablePeers: 0, DownloadedBytes: 0, UploadedBytes: 0,
-                RemainingBytes: 100, TotalPieces: 0, CompletePieces: 0, PieceLengthBytes: 0,
-                EtaSeconds: null, AddedAt: DateTimeOffset.UnixEpoch, ElapsedSeconds: 0));
+        imposter.GetSnapshot(Arg<string>.Any()).Returns(Snapshot("abc123", "Downloading"));
 
         var (client, app) = await HostAsync(Settings($"media={Path.Combine(Path.GetTempPath(), "dl", "media")}"), imposter.Instance());
         await using var _ = app;

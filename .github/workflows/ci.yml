@@ -30,3 +30,23 @@ jobs:
 
       - name: Test
         run: dotnet test src/TorrentEngine.Api.Tests/TorrentEngine.Api.Tests.csproj --configuration Release
+
+  aot:
+    name: AOT publish (linux-x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # Native AOT compiles a platform-native binary, so the runner needs a C toolchain + zlib headers.
+      - name: Install AOT toolchain
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+
+      # The image build only runs AOT on main (publish.yml), so an AOT-only regression would otherwise
+      # land before detection. Compile it here on every PR (publish, no push) against the shipped RID.
+      - name: AOT publish
+        run: dotnet publish src/TorrentEngine.Api/TorrentEngine.Api.csproj -c Release -r linux-x64 -o /tmp/aot-publish

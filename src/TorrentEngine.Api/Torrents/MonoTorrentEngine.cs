@@ -9,8 +9,10 @@ namespace TorrentEngine.Api.Torrents;
 
 /// <summary>
 /// MonoTorrent-backed <see cref="ITorrentEngine"/> and hosted service. Owns the <see cref="ClientEngine"/>,
-/// enables DHT/PEX/LSD and protocol encryption, binds the configured raw torrent port, and persists
-/// fast-resume/metadata under the app data dir so downloads survive restarts.
+/// enables DHT/PEX/LSD and protocol encryption, and binds the configured raw torrent port (IPv4-only unless
+/// a bind address is set — the killswitch is the leak defense, but the engine also must not solicit v6). On
+/// shutdown it persists the torrent roster plus fast-resume/metadata under the app data dir, and on startup
+/// restores that roster and resumes the torrents, so downloads survive an engine restart.
 /// </summary>
 public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposable
 {
@@ -21,6 +23,10 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     // When each torrent was added this session — feeds the snapshot's AddedAt/ElapsedSeconds. MonoTorrent
     // does not track this itself, and (like the Monitor's byte counters) it is session-scoped by design.
     private readonly ConcurrentDictionary<string, DateTimeOffset> _addedAt = new(StringComparer.OrdinalIgnoreCase);
+    // Info hashes with an AddAsync in flight. Reserved before the (awaited) engine add so two concurrent
+    // adds of the same hash can't both pass the endpoint's snapshot pre-check and race MonoTorrent into an
+    // unhandled "already registered" throw — the loser gets a DuplicateTorrentException (→ 409) instead.
+    private readonly ConcurrentDictionary<string, byte> _registering = new(StringComparer.OrdinalIgnoreCase);
 
     private ClientEngine? _engine;
 
@@ -34,7 +40,7 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     public event EventHandler<string>? DownloadCompleted;
     public event EventHandler<string>? DownloadErrored;
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartAsync(CancellationToken cancellationToken)
     {
         var port = _settings.Port;
         var bindAddress = TryParseBindAddress(_settings.BindAddress);
@@ -58,10 +64,88 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             ListenEndPoints = BuildListenEndPoints(bindAddress, port),
             DhtEndPoint = new IPEndPoint(bindAddress ?? IPAddress.Any, port),
         };
+        var settings = builder.ToSettings();
 
-        _engine = new ClientEngine(builder.ToSettings());
-        _logger.LogInformation("Torrent engine started on port {Port} (port mapping: {PortMapping}).", port, _settings.EnablePortMapping);
-        return Task.CompletedTask;
+        // Restore the torrent roster persisted on the previous shutdown so downloads survive an engine-only
+        // restart (StopAsync writes it via SaveStateAsync). Per-torrent fast-resume/metadata is already
+        // persisted under the cache dir, so a restored torrent resumes without a full re-hash. A missing or
+        // corrupt state file is non-fatal — fall back to a fresh engine rather than failing startup.
+        var restored = await RestoreEngineAsync(settings);
+        _engine = restored ?? new ClientEngine(settings);
+
+        var restoredCount = 0;
+        foreach (var manager in _engine.Torrents.ToList())
+        {
+            var infoHash = HashOf(manager.InfoHashes);
+            _managers[infoHash] = manager;
+            _addedAt.TryAdd(infoHash, DateTimeOffset.UtcNow);
+            manager.TorrentStateChanged += OnTorrentStateChanged;
+            // A restored torrent that is already complete will transition into Seeding on resume; mark its
+            // completion as already raised so the restart doesn't re-fire a `completed` event for it.
+            if (manager.Complete)
+            {
+                _completionRaised.TryAdd(infoHash, 0);
+            }
+
+            if (!manager.HasMetadata)
+            {
+                _ = WaitForMetadataAsync(infoHash, manager);
+            }
+
+            restoredCount++;
+        }
+
+        if (restoredCount > 0)
+        {
+            // Resume the restored torrents so an engine-only restart doesn't strand them stopped. The VPN
+            // gate re-pauses them on the next tick if the tunnel is down.
+            try
+            {
+                await _engine.StartAllAsync();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception, "Failed to resume one or more restored torrents.");
+            }
+        }
+
+        _logger.LogInformation(
+            "Torrent engine started on port {Port} (port mapping: {PortMapping}); restored {Count} torrent(s).",
+            port, _settings.EnablePortMapping, restoredCount);
+    }
+
+    // Rebuilds the engine from the persisted state file when present, re-applying the freshly-computed
+    // settings over the saved ones (so a changed port/rate/cache dir still takes effect). Returns null when
+    // there is no state to restore or it can't be read, so the caller starts a fresh engine.
+    private async Task<ClientEngine?> RestoreEngineAsync(EngineSettings settings)
+    {
+        var stateFile = StateFilePath;
+        if (!File.Exists(stateFile))
+        {
+            return null;
+        }
+
+        try
+        {
+            var engine = await ClientEngine.RestoreStateAsync(stateFile);
+            try
+            {
+                await engine.UpdateSettingsAsync(settings);
+            }
+            catch (Exception exception)
+            {
+                // Applying current settings failed — keep the restored engine (and its roster) on the saved
+                // settings rather than throwing the downloads away for a config-drift edge case.
+                _logger.LogWarning(exception, "Restored engine kept its persisted settings; could not apply the current ones.");
+            }
+
+            return engine;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not restore engine state from {StateFile}; starting fresh.", stateFile);
+            return null;
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -71,7 +155,9 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             try
             {
                 await _engine.StopAllAsync(TimeSpan.FromSeconds(10));
-                await _engine.SaveStateAsync();
+                // Persist the roster to a file (the parameterless overload only returns the bytes and drops
+                // them) so StartAsync can restore it. Best-effort: a write failure must not block shutdown.
+                await _engine.SaveStateAsync(StateFilePath);
             }
             catch (Exception exception)
             {
@@ -79,6 +165,10 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             }
         }
     }
+
+    /// <summary>Path of the persisted engine roster (the torrent list + settings) written on shutdown and
+    /// restored on startup. Lives alongside the fast-resume/metadata cache under the app data dir.</summary>
+    private string StateFilePath => Path.Combine(_settings.AppDataDir, "torrent-engine", "engine-state.bin");
 
     public TorrentDescriptor Inspect(TorrentSource source)
     {
@@ -121,58 +211,91 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             MaximumUploadRate = limits.MaxUploadRate,
         }.ToSettings();
 
-        TorrentManager manager;
-        TorrentDescriptor descriptor;
-
+        // Parse the source (and read its info hash) before touching the engine, so we can atomically reserve
+        // the hash and reject a concurrent duplicate add rather than let MonoTorrent throw "already registered".
+        MagnetLink? magnetLink = null;
+        Torrent? torrentFile = null;
+        string infoHash;
         switch (source)
         {
             case TorrentSource.Magnet magnet:
-            {
-                if (!MagnetLink.TryParse(magnet.Uri, out var link))
+                if (!MagnetLink.TryParse(magnet.Uri, out magnetLink))
                 {
                     throw new ArgumentException("Invalid magnet link.", nameof(source));
                 }
 
-                manager = await engine.AddAsync(link, saveDirectory, torrentSettings);
-                descriptor = new TorrentDescriptor(HashOf(link.InfoHashes), link.Name, link.Size, HasMetadata: false, []);
+                infoHash = HashOf(magnetLink.InfoHashes);
                 break;
-            }
 
             case TorrentSource.File file:
-            {
-                var torrent = await Torrent.LoadAsync(file.Content.AsMemory());
-                manager = await engine.AddAsync(torrent, saveDirectory, torrentSettings);
-                descriptor = new TorrentDescriptor(
-                    HashOf(torrent.InfoHashes), torrent.Name, torrent.Size, HasMetadata: true, MapFiles(torrent.Files, torrent.Name));
+                torrentFile = await Torrent.LoadAsync(file.Content.AsMemory());
+                infoHash = HashOf(torrentFile.InfoHashes);
                 break;
-            }
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(source));
         }
 
-        // Record the add time before exposing the manager, so any snapshot that observes the torrent also
-        // observes its AddedAt. TryAdd (not indexer assignment) so a value a racing snapshot already
-        // stabilized via AddedAtOf's GetOrAdd is not clobbered with a later timestamp.
-        _addedAt.TryAdd(descriptor.InfoHash, DateTimeOffset.UtcNow);
-        _managers[descriptor.InfoHash] = manager;
-        manager.TorrentStateChanged += OnTorrentStateChanged;
-
-        if (autoStart)
+        // Reserve the hash before touching the engine. TryAdd first (atomic), *then* the _managers check —
+        // ordering matters: a torrent that finished registering on another thread populates _managers before
+        // it releases its reservation, so checking _managers only after we hold the reservation closes the
+        // window where both threads could proceed into MonoTorrent's unhandled "already registered" (500).
+        if (!_registering.TryAdd(infoHash, 0))
         {
-            await manager.StartAsync();
+            throw new DuplicateTorrentException(infoHash);
         }
 
-        if (!descriptor.HasMetadata)
+        try
         {
-            _ = WaitForMetadataAsync(descriptor.InfoHash, manager);
-        }
-        else
-        {
-            RaiseMetadata(descriptor.InfoHash);
-        }
+            if (_managers.ContainsKey(infoHash))
+            {
+                throw new DuplicateTorrentException(infoHash);
+            }
 
-        return descriptor;
+            TorrentManager manager;
+            TorrentDescriptor descriptor;
+            if (magnetLink is not null)
+            {
+                manager = await engine.AddAsync(magnetLink, saveDirectory, torrentSettings);
+                descriptor = new TorrentDescriptor(infoHash, magnetLink.Name, magnetLink.Size, HasMetadata: false, []);
+            }
+            else
+            {
+                // Map (and validate) the file list *before* mutating the engine: SafeRelative can reject a
+                // hostile torrent name/path, and it must not leave the torrent registered-but-unreachable.
+                var files = MapFiles(torrentFile!.Files, torrentFile.Name);
+                manager = await engine.AddAsync(torrentFile, saveDirectory, torrentSettings);
+                descriptor = new TorrentDescriptor(infoHash, torrentFile.Name, torrentFile.Size, HasMetadata: true, files);
+            }
+
+            // Record the add time before exposing the manager, so any snapshot that observes the torrent also
+            // observes its AddedAt. TryAdd (not indexer assignment) so a value a racing snapshot already
+            // stabilized via AddedAtOf's GetOrAdd is not clobbered with a later timestamp.
+            _addedAt.TryAdd(infoHash, DateTimeOffset.UtcNow);
+            _managers[infoHash] = manager;
+            manager.TorrentStateChanged += OnTorrentStateChanged;
+
+            if (autoStart)
+            {
+                await manager.StartAsync();
+            }
+
+            if (!descriptor.HasMetadata)
+            {
+                _ = WaitForMetadataAsync(infoHash, manager);
+            }
+            else
+            {
+                RaiseMetadata(infoHash);
+            }
+
+            return descriptor;
+        }
+        finally
+        {
+            // The manager is in _managers now (or the add threw); either way the in-flight reservation is done.
+            _registering.TryRemove(infoHash, out _);
+        }
     }
 
     public async Task PauseAsync(string infoHash, CancellationToken cancellationToken)
@@ -386,7 +509,7 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         for (var index = 0; index < manager.Files.Count; index++)
         {
             var file = manager.Files[index];
-            var relative = NormalizeRelative(Path.GetRelativePath(manager.SavePath, file.FullPath));
+            var relative = SafeRelative(Path.GetRelativePath(manager.SavePath, file.FullPath));
             files.Add(new TorrentFileInfo(index, relative, file.Length));
         }
 
@@ -399,32 +522,47 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         for (var index = 0; index < torrentFiles.Count; index++)
         {
             var file = torrentFiles[index];
-            var relative = NormalizeRelative(Path.Combine(torrentName, file.Path));
+            var relative = SafeRelative(Path.Combine(torrentName, file.Path));
             files.Add(new TorrentFileInfo(index, relative, file.Length));
         }
 
         return files;
     }
 
-    private static string NormalizeRelative(string path) => path.Replace('\\', '/');
+    // Normalizes to POSIX separators and rejects any path that is rooted or walks up via a ".." segment.
+    // The torrent name (and, for a descriptor, the file paths) is attacker-controlled, so an emitted
+    // RelativePath must never lexically escape the save directory when a consumer combines it with its own
+    // root. The rooted check is platform-independent (not Path.IsPathRooted, which wouldn't see a Windows
+    // drive path on Linux) so it protects cross-platform consumers regardless of where this app runs.
+    // On-disk placement inside this app is separately guarded by MonoTorrent's own PathValidator.
+    private static string SafeRelative(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        var rooted = normalized.StartsWith('/')
+            || (normalized.Length >= 2 && char.IsAsciiLetter(normalized[0]) && normalized[1] == ':'); // e.g. C:/…
+        if (rooted || normalized.Split('/').Any(static segment => segment == ".."))
+        {
+            throw new ArgumentException($"Torrent file path '{path}' is not a safe relative path.");
+        }
+
+        return normalized;
+    }
 
     private static string HashOf(InfoHashes infoHashes) => infoHashes.V1OrV2.ToHex();
 
     private static IPAddress? TryParseBindAddress(string? address) =>
         !string.IsNullOrWhiteSpace(address) && IPAddress.TryParse(address, out var parsed) ? parsed : null;
 
-    // With no bind address, listen on all IPv4 + IPv6 interfaces. With one set (e.g. a VPN tun
-    // address), bind ONLY that address's family so the port is not also exposed on every interface
-    // via IPv6Any.
+    // With no bind address, listen on IPv4 only. The killswitch (docker/entrypoint.sh) confines egress to
+    // the tunnel with iptables *and* ip6tables, but the engine must not solicit IPv6 peers/DHT in the first
+    // place: binding IPv6Any here would advertise and accept v6 traffic that, on an IPv6-enabled docker
+    // network, could bypass the (historically IPv4-only) tunnel. Set TORRENT_BIND_ADDRESS to a specific
+    // address (e.g. the tun interface) to bind only that address's family.
     private static Dictionary<string, IPEndPoint> BuildListenEndPoints(IPAddress? bindAddress, int port)
     {
         if (bindAddress is null)
         {
-            return new Dictionary<string, IPEndPoint>
-            {
-                ["ipv4"] = new IPEndPoint(IPAddress.Any, port),
-                ["ipv6"] = new IPEndPoint(IPAddress.IPv6Any, port),
-            };
+            return new Dictionary<string, IPEndPoint> { ["ipv4"] = new IPEndPoint(IPAddress.Any, port) };
         }
 
         var key = bindAddress.AddressFamily == AddressFamily.InterNetworkV6 ? "ipv6" : "ipv4";

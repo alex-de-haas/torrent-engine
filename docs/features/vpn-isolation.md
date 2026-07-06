@@ -35,13 +35,18 @@ The entrypoint runs as PID 1 up to the final `exec`, in this order:
    the value as raw. CRLF is stripped so `remote` parsing doesn't carry a trailing
    `\r`. If `OPENVPN_USERNAME` is set, an `--auth-user-pass` file is written.
 2. **Apply the killswitch** (see below) — **before** OpenVPN starts, so there is no
-   window where traffic can leak.
-3. **Start OpenVPN** as a daemon (`--writepid`, `--log /var/log/openvpn.log`).
-4. **Wait for the tunnel** — up to 60s for `tun0` to appear; logs and continues.
+   window where traffic can leak. This also resolves the VPN `remote`(s) and the
+   telemetry collector once, **pinning** each into `/etc/hosts` while docker's DNS is
+   still reachable, so later lookups survive the resolv.conf rewrite below.
+3. **Start OpenVPN** as a daemon (`--writepid`, `--log /var/log/openvpn.log`); its
+   log is also mirrored to stdout so it shows up in `docker logs`.
+4. **Wait for the tunnel** — up to 60s for `tun0` to appear; logs and continues (the
+   killswitch keeps traffic contained even if it doesn't come up in time).
 5. **Route DNS through the tunnel.** Once `redirect-gateway` sends traffic over
    `tun0`, the host/docker resolver becomes unreachable and using it would leak
    lookups outside the VPN. `resolv.conf` is rewritten to a tunnel-reachable
-   resolver (`VPN_DNS`, default `1.1.1.1`).
+   resolver (`VPN_DNS`, default `1.1.1.1`). The `remote`/collector hosts pinned in
+   step 2 still resolve because they now come from `/etc/hosts`, not DNS.
 6. **Start a watchdog** — a background loop that every 10s checks whether the
    `openvpn` process is alive (by name, robust to a stale PID file) and restarts it
    if it died, so the tunnel — the killswitch's only egress path — comes back
@@ -64,14 +69,37 @@ The entrypoint runs as PID 1 up to the final `exec`, in this order:
   opens the port the API actually binds.
 - **Tunnel** — everything in/out over `tun0`.
 - **VPN endpoint** — the `remote <host> [port] [proto]` lines from the `.ovpn` are
-  parsed (default `udp` / `1194`), the hostnames resolved, and outbound to those
-  IP/port/proto allowed on the bridge — just enough for OpenVPN to establish the
-  tunnel.
+  parsed (default `udp` / `1194`; a `proto` of `tcp-client`/`udp4`/… is mapped to the
+  `tcp`/`udp` iptables understands), the hostnames resolved and pinned, and outbound
+  to those IP/port/proto allowed on the bridge — just enough for OpenVPN to establish
+  the tunnel.
+- **Telemetry collector** — when `OTEL_EXPORTER_OTLP_ENDPOINT` is injected, its host
+  (typically `host.docker.internal`, reachable only on the bridge) is pinned, given a
+  `/32` route so it keeps using the bridge after `redirect-gateway`, and allowed
+  outbound on the bridge. Without this the killswitch would silently drop every export
+  (see [Observability egress](#observability-egress)).
+
+The **IPv4** rules above are mirrored by an **IPv6** default-deny (`ip6tables`):
+loopback, established/related, and `tun0` are allowed and everything else is dropped.
+The engine binds IPv4-only (it doesn't solicit v6 peers/DHT), so this is belt-and-
+suspenders against stray v6 leaking around the (IPv4) tunnel on an IPv6-enabled docker
+network. It is skipped when the container has no IPv6 stack (nothing to leak).
 
 The net effect: the consumer can reach the control API on the bridge, OpenVPN can
-reach its server on the bridge, and **all other egress** (every peer connection,
-DNS, the exit-IP check) can leave only through `tun0`. If the tunnel is down, that
-traffic is dropped rather than falling back to the direct connection.
+reach its server on the bridge, the telemetry collector is reachable on the bridge,
+and **all other egress** (every peer connection, DNS, the exit-IP check) can leave
+only through `tun0`. If the tunnel is down, that traffic is dropped rather than
+falling back to the direct connection.
+
+### Observability egress
+
+The engine's OTLP exporter only wires up when Core injects `OTEL_EXPORTER_OTLP_ENDPOINT`
+(docker runtime + observability enabled). That collector lives on the docker host, not
+past the tunnel, and two things would otherwise make exports vanish: the killswitch drops
+the new bridge connection, and the resolv.conf rewrite makes `host.docker.internal`
+unresolvable. The entrypoint's collector allowance (pin + `/32` bridge route + `iptables`
+accept) is what lets telemetry actually leave. It is a first cut and, like the killswitch,
+should be validated against a real collector before relying on it.
 
 ## VPN status monitor (`Vpn/VpnStatusMonitor.cs`)
 
@@ -136,10 +164,19 @@ comes up (see [Consumer integration](consumer-integration.md)).
 
 ## Open questions
 
-- **Killswitch hardening.** The iptables rules are a first cut and need leak tests
-  on tunnel drop in a real VPN environment before privacy-sensitive use.
-- **Killswitch scope.** The rules assume a single default-route bridge interface and
-  IPv4 `remote` endpoints; IPv6 egress and multi-homed setups are not yet covered.
+- **Killswitch hardening.** The iptables/ip6tables rules are a first cut and need leak
+  tests on tunnel drop in a real VPN environment before privacy-sensitive use.
+- **Killswitch scope.** IPv6 is now default-denied and the engine binds IPv4-only, so
+  v6 no longer leaks around the tunnel. Still assumed: a single default-route bridge
+  interface, and an **IPv4** `remote` endpoint (a v6-only `remote` is not reachable
+  under the v6 default-deny — allow it explicitly if needed). Multi-homed setups are
+  not covered.
+- **Reconnect DNS.** The VPN `remote` is pinned into `/etc/hosts` at boot so an OpenVPN
+  reconnect (with the tunnel — and thus its DNS — down) still resolves it. A `remote`
+  whose IP changes while the tunnel is down would still need a container restart.
+- **Telemetry egress.** The collector allowance is best-effort and depends on the
+  collector being reachable via the original bridge gateway; validate exports actually
+  arrive when enabling observability.
 
 ## Testing Expectations
 
