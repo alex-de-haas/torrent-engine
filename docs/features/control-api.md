@@ -13,8 +13,12 @@ progress and state transitions. It is the only way in — the MonoTorrent engine
 never reached directly. Engine records (`TorrentDescriptor`, `TorrentSnapshot`,
 `TorrentFileInfo`) are returned on the wire as-is; there is no separate DTO layer.
 
-The API is stateless per request and has no auth today (the endpoint is
-non-public; see [Consumer integration](consumer-integration.md)). All JSON is
+The API is stateless per request. It is unauthenticated by default (the endpoint
+is non-public; see [Consumer integration](consumer-integration.md)), but setting
+the `CONTROL_API_TOKEN` secret turns on an interim shared-secret check: every
+request except `/healthz` must then carry the token in an `X-Api-Token` header, or
+it is rejected with `401`. This bounds the "anything on the docker bridge can drive
+the engine" exposure until platform app-identity tokens land. All JSON is
 serialized through a source-generated `System.Text.Json` context
 (`Api/AppJsonSerializerContext.cs`) so the app works under Native AOT — no
 reflection-based serialization at runtime.
@@ -23,7 +27,7 @@ reflection-based serialization at runtime.
 
 | Method &amp; path | Purpose | Success | Notable errors |
 | --- | --- | --- | --- |
-| `POST /downloads` | Add a torrent (magnet or `.torrent`) | `200` `TorrentDescriptor` | `400` bad source/rate/path, `409` already registered |
+| `POST /downloads` | Add a torrent (magnet or `.torrent`) | `200` `TorrentDescriptor` | `400` bad source/rate/path, `409` already registered / at active limit, `401` missing token |
 | `GET /downloads` | List all live snapshots | `200` `TorrentSnapshot[]` | — |
 | `GET /downloads/{infoHash}` | One live snapshot | `200` `TorrentSnapshot` | `404` unknown hash |
 | `GET /downloads/{infoHash}/files` | File list for a torrent | `200` `TorrentFileInfo[]` | `404` unknown hash |
@@ -54,10 +58,14 @@ Body (`AddDownloadRequest`); provide **exactly one** of `magnet` / `torrentBase6
 | `autoStart` | bool? | Start immediately (default `true`). `false` adds the torrent stopped. |
 
 The handler validates before it mutates: it inspects the source to read the info
-hash up front (a bad magnet/`.torrent` is a `400`, not a `500`), rejects a re-add
-of an already-registered hash with `409`, checks the rates, and resolves the save
-directory (an unknown `mountLabel` or an off-mount `savePath` is a `400`) — only
-then does it add to the engine.
+hash up front (a bad magnet/`.torrent` — including valid-base64 but garbage bencode
+— is a `400`, not a `500`), rejects a re-add of an already-registered hash with
+`409`, rejects an add that would exceed the active-torrent cap
+(`TORRENT_MAX_ACTIVE`, `0` = unlimited) with `409`, checks the rates, and resolves
+the save directory (an unknown `mountLabel` or an off-mount `savePath` is a `400`) —
+only then does it add to the engine. The engine also reserves the info hash
+atomically, so two concurrent adds of the same hash yield one `200` and one `409`
+rather than a `500`.
 
 The response is a `TorrentDescriptor` — what is known immediately:
 
@@ -142,12 +150,18 @@ There is no server→client backfill or replay: a client that connects mid-downl
 gets the next `progress` tick, and should seed initial state from `GET /downloads`
 and `GET /vpn`.
 
+An otherwise-idle stream emits an SSE comment (`: ping`) every ~20s so a stream that
+would send zero bytes isn't silently dropped by an intermediary proxy. Clients
+ignore comment lines.
+
 ## Error envelope
 
-Client errors return `400`/`404`/`409` with an `ErrorResponse` body,
+`400`/`409` (and the `401` from the token check) carry an `ErrorResponse` body,
 `{ "error": "<message>" }`. The message is human-readable and safe to surface to an
-operator (e.g. an unknown `mountLabel` lists the configured labels). `/healthz`
-returns `{ "status": "ok" }`.
+operator (e.g. an unknown `mountLabel` lists the configured labels). A `404` for an
+unknown info hash (`GET /downloads/{infoHash}` / `…/files`) has an **empty** body —
+the hash in the path is all the context there is. `/healthz` returns
+`{ "status": "ok" }`.
 
 ## Testing Expectations
 

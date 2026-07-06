@@ -33,8 +33,12 @@ Defaults come from `manifest.json`; the operator sets them through the Hosty She
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `TORRENT_PORT` | `6881` | Raw L4 listen port (TCP + UDP). Under the VPN, the port bound inside the tunnel. |
+| `TORRENT_BIND_ADDRESS` | (IPv4, all interfaces) | Bind the listen + DHT endpoint to one address (e.g. the VPN tun address). Unset → IPv4 `Any` only (the engine deliberately doesn't solicit IPv6). Set → binds **only** that address's family. |
+| `TORRENT_ENABLE_PORT_MAPPING` | `false` | UPnP / NAT-PMP automatic port mapping. Off by default (irrelevant behind a VPN). |
 | `TORRENT_MAX_DOWNLOAD_SPEED` | `0` | Global max download rate, bytes/sec (`0` = unlimited). Per-download `maxDownloadRate` overrides it. |
 | `TORRENT_MAX_UPLOAD_SPEED` | `0` | Global max upload rate, bytes/sec (`0` = unlimited). Per-download `maxUploadRate` overrides it. |
+| `TORRENT_MAX_ACTIVE` | `0` | Max concurrently-registered torrents (`0` = unlimited). An add beyond the cap is a `409`. |
+| `CONTROL_API_TOKEN` | — | Optional shared secret (secret field). Set → every request except `/healthz` must present it in `X-Api-Token`, else `401`. Unset → the API is open. |
 
 ### VPN tunnel (secrets + monitor)
 
@@ -47,16 +51,6 @@ Defaults come from `manifest.json`; the operator sets them through the Hosty She
 | `VPN_DNS` | `1.1.1.1` | Tunnel-reachable resolver `resolv.conf` is pointed at once the tunnel is up (so lookups don't leak or break). |
 | `VPN_EXIT_IP_CHECK` | `true` | Whether the monitor performs the best-effort exit-IP check (an outbound call over the tunnel). |
 | `VPN_EXIT_IP_CHECK_URL` | `https://ipinfo.io/json` | Endpoint for the exit-IP check; a JSON body with `ip`/`country` is preferred, a plain-text IP is accepted. |
-
-## Engine-only / advanced variables
-
-Read by `TorrentEngineSettings` but not surfaced as manifest settings — set them
-directly (e.g. for a local run) when needed:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `TORRENT_BIND_ADDRESS` | (all interfaces) | Bind the listen + DHT endpoint to one address (e.g. the VPN tun address). Set → the engine binds **only** that address's family instead of `Any` + `IPv6Any`. |
-| `TORRENT_ENABLE_PORT_MAPPING` | `false` | UPnP / NAT-PMP automatic port mapping. Off by default (irrelevant behind a VPN). |
 
 ## Precedence notes
 
