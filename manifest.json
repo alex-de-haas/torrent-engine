@@ -53,5 +53,22 @@
     { "key": "VPN_EXIT_IP_CHECK_URL", "type": "string", "default": "https://ipinfo.io/json", "label": "Exit-IP check URL", "description": "Endpoint for the exit-IP check. A JSON body with ip/country is preferred; a plain-text IP is accepted." }
   ],
   "telemetry": { "enabled": true, "sampleRatio": 0.1 },
-  "capabilities": ["update", "restart", "stop", "remove", "backup", "restore", "logs"]
+  "capabilities": ["update", "restart", "stop", "remove", "backup", "restore", "logs"],
+  "catalogMetadata": {
+    "publisher": {
+      "name": "Haas",
+      "url": "https://github.com/alex-de-haas",
+      "email": "a.zayats@outlook.com"
+    },
+    "category": "Networking",
+    "tags": ["torrent", "bittorrent", "vpn", "downloads", "engine"],
+    "icon": "assets/icon.svg",
+    "license": "AGPL-3.0-only",
+    "links": {
+      "website": "https://github.com/alex-de-haas/torrent-engine",
+      "docs": "https://github.com/alex-de-haas/torrent-engine/blob/main/docs/root.md"
+    },
+    "summary": "VPN-isolated BitTorrent engine with an HTTP/SSE control API for other Hosty apps.",
+    "descriptionFile": "docs/store.md"
+  }
 }
