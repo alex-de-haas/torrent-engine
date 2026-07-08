@@ -2,7 +2,7 @@
   "versions": [
     {
       "version": "0.4.0",
-      "manifestRef": "https://raw.githubusercontent.com/alex-de-haas/torrent-engine/main/manifest.json"
+      "manifestRef": "https://raw.githubusercontent.com/alex-de-haas/torrent-engine/efc568f8f06ec04e611ca1ad71c901fd0e5ad133/manifest.json"
     }
   ],
   "tags": {
