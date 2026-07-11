@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "app-feeds.0.1",
+  "appId": "com.haas.torrent-engine",
+  "feeds": [
+    {
+      "id": "main",
+      "manifestRef": "https://raw.githubusercontent.com/alex-de-haas/torrent-engine/main/manifest.json",
+      "default": true
+    }
+  ]
+}
