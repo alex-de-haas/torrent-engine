@@ -3,7 +3,7 @@
   "id": "com.haas.torrent-engine",
   "name": "Torrent Engine",
   "description": "VPN-isolated BitTorrent engine (MonoTorrent) with an HTTP/SSE control API, for other Hosty apps to drive downloads over a dependency.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "runtimeProfiles": [
     { "key": "docker", "type": "docker", "default": true }
   ],
@@ -53,7 +53,7 @@
     { "key": "VPN_EXIT_IP_CHECK_URL", "type": "string", "default": "https://ipinfo.io/json", "label": "Exit-IP check URL", "description": "Endpoint for the exit-IP check. A JSON body with ip/country is preferred; a plain-text IP is accepted." }
   ],
   "telemetry": { "enabled": true, "sampleRatio": 0.1 },
-  "capabilities": ["update", "restart", "stop", "remove", "backup", "restore", "logs"],
+  "capabilities": ["backup", "logs"],
   "catalogMetadata": {
     "publisher": {
       "name": "Haas",
