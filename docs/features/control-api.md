@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-03
+Updated: 2026-07-20
 
 ## Description
 
@@ -29,7 +29,7 @@ reflection-based serialization at runtime.
 
 | Method &amp; path | Purpose | Success | Notable errors |
 | --- | --- | --- | --- |
-| `POST /downloads` | Add a torrent (magnet or `.torrent`) | `200` `TorrentDescriptor` | `400` bad source/rate/path, `409` already registered / at active limit, `401` missing token |
+| `POST /downloads` | Add a torrent (magnet or `.torrent`) | `200` `TorrentDescriptor` | `400` bad source/rate/path, `409` already registered / at active limit |
 | `GET /downloads` | List all live snapshots | `200` `TorrentSnapshot[]` | — |
 | `GET /downloads/{infoHash}` | One live snapshot | `200` `TorrentSnapshot` | `404` unknown hash |
 | `GET /downloads/{infoHash}/files` | File list for a torrent | `200` `TorrentFileInfo[]` | `404` unknown hash |
@@ -158,7 +158,7 @@ ignore comment lines.
 
 ## Error envelope
 
-`400`/`409` (and the `401` from the token check) carry an `ErrorResponse` body,
+`400`/`409` carry an `ErrorResponse` body,
 `{ "error": "<message>" }`. The message is human-readable and safe to surface to an
 operator (e.g. an unknown `mountLabel` lists the configured labels). A `404` for an
 unknown info hash (`GET /downloads/{infoHash}` / `…/files`) has an **empty** body —
