@@ -36,11 +36,6 @@ public sealed class TorrentEngineSettings
     /// (as-yet-unauthenticated) caller on the docker bridge can make the engine store.</summary>
     public int MaxActiveTorrents { get; init; }
 
-    /// <summary>Optional shared secret for the control API. When set, every request except <c>/healthz</c>
-    /// must present it in the <c>X-Api-Token</c> header; null/empty leaves the API open (the historical
-    /// single-tenant, non-public deployment). An interim measure until platform app-identity tokens land.</summary>
-    public string? ControlApiToken { get; init; }
-
     /// <summary>Name of the VPN tunnel interface the killswitch confines traffic to (see
     /// <c>docker/entrypoint.sh</c>). Used by the VPN status monitor to detect the tunnel.</summary>
     public string VpnInterface { get; init; } = "tun0";
@@ -72,7 +67,6 @@ public sealed class TorrentEngineSettings
             MaxDownloadSpeed = ReadInt("TORRENT_MAX_DOWNLOAD_SPEED", 0),
             MaxUploadSpeed = ReadInt("TORRENT_MAX_UPLOAD_SPEED", 0),
             MaxActiveTorrents = ReadInt("TORRENT_MAX_ACTIVE", 0),
-            ControlApiToken = Read("CONTROL_API_TOKEN"),
             VpnInterface = Read("VPN_INTERFACE") ?? "tun0",
             VpnExitCheckEnabled = ReadBool("VPN_EXIT_IP_CHECK", true),
             VpnExitCheckUrl = Read("VPN_EXIT_IP_CHECK_URL") ?? "https://ipinfo.io/json",

@@ -38,7 +38,6 @@ Defaults come from `manifest.json`; the operator sets them through the Hosty She
 | `TORRENT_MAX_DOWNLOAD_SPEED` | `0` | Global max download rate, bytes/sec (`0` = unlimited). Per-download `maxDownloadRate` overrides it. |
 | `TORRENT_MAX_UPLOAD_SPEED` | `0` | Global max upload rate, bytes/sec (`0` = unlimited). Per-download `maxUploadRate` overrides it. |
 | `TORRENT_MAX_ACTIVE` | `0` | Max concurrently-registered torrents (`0` = unlimited). An add beyond the cap is a `409`. |
-| `CONTROL_API_TOKEN` | — | Optional shared secret (secret field). Set → every request except `/healthz` must present it in `X-Api-Token`, else `401`. Unset → the API is open. |
 
 ### VPN tunnel (secrets + monitor)
 

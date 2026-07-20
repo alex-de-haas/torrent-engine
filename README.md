@@ -54,9 +54,10 @@ Implemented:
 
 TODO (next chunks):
 - Leak-test the killswitch in a real VPN environment (see Open questions).
-- Secure cross-app calling — the control endpoint is non-public; auth is off by default but an
-  interim `CONTROL_API_TOKEN` shared secret (checked via the `X-Api-Token` header) can be set
-  until platform app-identity tokens land (see Open questions).
+- Secure cross-app calling — the control endpoint is non-public and unauthenticated; caller
+  authentication waits on the platform cross-app auth mechanism (peer introspection of the
+  app service token, proposed in the Hosty repo as `docs/ideas/cross-app-auth.md`). The
+  interim `CONTROL_API_TOKEN` shared secret was removed unused in 0.5.0 (see Open questions).
 
 ## Control API
 
@@ -157,9 +158,10 @@ platform repo (not this one).
   dependency and calls the control API), but the `control` endpoint is **non-public** while
   Hosty cross-app `dependencies` today resolve a *public*, host-reachable endpoint. Reaching
   a non-public endpoint across containers needs the planned shared cross-app docker network
-  (and, for real multi-tenant use, the Hosty app-identity token mechanism). As an interim
-  measure, setting `CONTROL_API_TOKEN` requires every request (except `/healthz`) to present
-  it in an `X-Api-Token` header; left unset the API is open, assuming a trusted single-tenant
-  deployment.
+  (and, for real multi-tenant use, the Hosty app-identity token mechanism — proposed as peer
+  introspection of the app service token, `docs/ideas/cross-app-auth.md` in the Hosty repo).
+  An interim `CONTROL_API_TOKEN` shared secret existed through 0.4.x but was removed unused
+  in 0.5.0: no consumer ever sent it, so enabling it could only break the one integration
+  that exists. The API is open, assuming a trusted single-tenant deployment.
 - **Killswitch hardening:** the iptables rules in `docker/entrypoint.sh` are a first cut
   and need validation in a real VPN environment (leak tests on tunnel drop).

@@ -3,8 +3,6 @@
 // A MonoTorrent engine behind the OpenVPN killswitch (docker/entrypoint.sh) exposed over an
 // HTTP/SSE control API for other Hosty apps to drive downloads. See README.
 
-using System.Security.Cryptography;
-using System.Text;
 using TorrentEngine.Api.Api;
 using TorrentEngine.Api.Realtime;
 using TorrentEngine.Api.Telemetry;
@@ -46,31 +44,10 @@ builder.Services.AddHostedService<VpnDownloadGate>();
 
 var app = builder.Build();
 
-// Interim shared-secret auth: when CONTROL_API_TOKEN is set, every request except /healthz must carry it
-// in X-Api-Token. This removes the "anything on the docker bridge can drive the engine" exposure until the
-// platform's app-identity tokens land. Left off (token null/empty) the API stays open, as before.
-if (!string.IsNullOrEmpty(engineSettings.ControlApiToken))
-{
-    var expected = SHA256.HashData(Encoding.UTF8.GetBytes(engineSettings.ControlApiToken));
-    app.Use(async (context, next) =>
-    {
-        if (context.Request.Path.StartsWithSegments("/healthz"))
-        {
-            await next();
-            return;
-        }
-
-        var provided = SHA256.HashData(Encoding.UTF8.GetBytes(context.Request.Headers["X-Api-Token"].ToString()));
-        if (!CryptographicOperations.FixedTimeEquals(provided, expected))
-        {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(new ErrorResponse("Missing or invalid X-Api-Token."), AppJsonSerializerContext.Default.ErrorResponse);
-            return;
-        }
-
-        await next();
-    });
-}
+// The control API is unauthenticated: the endpoint is non-public and the deployment model is a
+// trusted single-tenant host. Caller authentication is deferred to the platform's cross-app auth
+// mechanism (peer introspection of the app service token, proposed in the Hosty repo as
+// docs/ideas/cross-app-auth.md); the interim CONTROL_API_TOKEN shared secret was removed unused.
 
 // Liveness — also used by a consumer to gate readiness while the VPN tunnel comes up.
 app.MapGet("/healthz", () => Results.Ok(new HealthResponse("ok")));
