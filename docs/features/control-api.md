@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-03
+Updated: 2026-07-20
 
 ## Description
 
@@ -13,12 +13,14 @@ progress and state transitions. It is the only way in — the MonoTorrent engine
 never reached directly. Engine records (`TorrentDescriptor`, `TorrentSnapshot`,
 `TorrentFileInfo`) are returned on the wire as-is; there is no separate DTO layer.
 
-The API is stateless per request. It is unauthenticated by default (the endpoint
-is non-public; see [Consumer integration](consumer-integration.md)), but setting
-the `CONTROL_API_TOKEN` secret turns on an interim shared-secret check: every
-request except `/healthz` must then carry the token in an `X-Api-Token` header, or
-it is rejected with `401`. This bounds the "anything on the docker bridge can drive
-the engine" exposure until platform app-identity tokens land. All JSON is
+The API is stateless per request. It is unauthenticated (the endpoint is
+non-public; see [Consumer integration](consumer-integration.md)); caller
+authentication is deferred to the platform's cross-app auth mechanism — peer
+introspection of the app service token, proposed in the Hosty repo as
+`docs/ideas/cross-app-auth.md`. An interim `CONTROL_API_TOKEN` shared-secret check
+existed through 0.4.x and was removed unused in 0.5.0 (no consumer ever sent the
+`X-Api-Token` header, so enabling it could only 401 the one integration that
+exists). All JSON is
 serialized through a source-generated `System.Text.Json` context
 (`Api/AppJsonSerializerContext.cs`) so the app works under Native AOT — no
 reflection-based serialization at runtime.
@@ -27,7 +29,7 @@ reflection-based serialization at runtime.
 
 | Method &amp; path | Purpose | Success | Notable errors |
 | --- | --- | --- | --- |
-| `POST /downloads` | Add a torrent (magnet or `.torrent`) | `200` `TorrentDescriptor` | `400` bad source/rate/path, `409` already registered / at active limit, `401` missing token |
+| `POST /downloads` | Add a torrent (magnet or `.torrent`) | `200` `TorrentDescriptor` | `400` bad source/rate/path, `409` already registered / at active limit |
 | `GET /downloads` | List all live snapshots | `200` `TorrentSnapshot[]` | — |
 | `GET /downloads/{infoHash}` | One live snapshot | `200` `TorrentSnapshot` | `404` unknown hash |
 | `GET /downloads/{infoHash}/files` | File list for a torrent | `200` `TorrentFileInfo[]` | `404` unknown hash |
@@ -156,7 +158,7 @@ ignore comment lines.
 
 ## Error envelope
 
-`400`/`409` (and the `401` from the token check) carry an `ErrorResponse` body,
+`400`/`409` carry an `ErrorResponse` body,
 `{ "error": "<message>" }`. The message is human-readable and safe to surface to an
 operator (e.g. an unknown `mountLabel` lists the configured labels). A `404` for an
 unknown info hash (`GET /downloads/{infoHash}` / `…/files`) has an **empty** body —

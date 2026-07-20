@@ -32,8 +32,7 @@ once:
 `OPENVPN_CONFIG` is **required** — traffic is not routed until the tunnel is up. It
 accepts the raw `.ovpn` contents or a base64 encoding of them; prefer base64 for a
 single-line secret field (`base64 -w0 client.ovpn`, or `base64 -i client.ovpn | tr -d
-'\n'` on macOS). Optional username/password and an interim `CONTROL_API_TOKEN` shared
-secret round out the settings.
+'\n'` on macOS). Optional username/password round out the settings.
 
 ## Using it
 

@@ -3,7 +3,7 @@
   "id": "com.haas.torrent-engine",
   "name": "Torrent Engine",
   "description": "VPN-isolated BitTorrent engine (MonoTorrent) with an HTTP/SSE control API, for other Hosty apps to drive downloads over a dependency.",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "runtimeProfiles": [
     { "key": "docker", "type": "docker", "default": true }
   ],
@@ -40,7 +40,6 @@
     { "key": "OPENVPN_CONFIG", "type": "string", "secret": true, "required": true, "label": "OpenVPN configuration", "description": "The .ovpn file contents, raw or base64-encoded (base64 preferred for a single-line secret). Required — traffic is not routed until the tunnel is up." },
     { "key": "OPENVPN_USERNAME", "type": "string", "secret": true, "label": "OpenVPN username", "description": "Username for VPN authentication, if your provider requires it." },
     { "key": "OPENVPN_PASSWORD", "type": "string", "secret": true, "label": "OpenVPN password", "description": "Password for VPN authentication, if your provider requires it." },
-    { "key": "CONTROL_API_TOKEN", "type": "string", "secret": true, "label": "Control API token", "description": "Optional shared secret. When set, every control-API request except /healthz must present it in the X-Api-Token header; when unset, the API is open." },
     { "key": "TORRENT_PORT", "type": "number", "default": "6881", "label": "Torrent listen port", "description": "TCP/UDP port the BitTorrent engine listens on inside the tunnel." },
     { "key": "TORRENT_BIND_ADDRESS", "type": "string", "label": "Torrent bind address", "description": "Bind the listen and DHT endpoint to a single address (e.g. the VPN tun address). Leave unset to bind IPv4 on all interfaces." },
     { "key": "TORRENT_ENABLE_PORT_MAPPING", "type": "boolean", "default": "false", "label": "Enable UPnP / NAT-PMP port mapping", "description": "Automatic router port mapping. Off by default and generally unnecessary behind a VPN." },
