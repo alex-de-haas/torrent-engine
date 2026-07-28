@@ -94,6 +94,10 @@ public interface ITorrentEngine
 
     IReadOnlyList<TorrentSnapshot> GetAllSnapshots();
 
+    /// <summary>How many torrents are registered. A cheap emptiness check for callers that only need to
+    /// know whether there is anything to act on, without building a snapshot per torrent.</summary>
+    int TorrentCount { get; }
+
     /// <summary>The file list, or <c>null</c> when no torrent with this info hash is registered
     /// (an empty list means the torrent exists but has no metadata yet).</summary>
     IReadOnlyList<TorrentFileInfo>? GetFiles(string infoHash);

@@ -1,8 +1,7 @@
 # Torrent Engine
 
-Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-03
+Updated: 2026-07-28
 
 ## Description
 
@@ -16,7 +15,7 @@ owns **no** persistence beyond MonoTorrent's own fast-resume/metadata cache, and
 surfaces only live snapshots plus a few transition events.
 
 The engine is configured entirely from `TorrentEngineSettings` (see
-[Configuration](configuration.md)); it never hard-codes ports or paths.
+[Configuration](../configuration.md)); it never hard-codes ports or paths.
 
 ## Engine configuration
 
@@ -67,6 +66,9 @@ Each torrent is added with per-torrent `TorrentSettings`: DHT and PEX on,
 - **`GetSnapshot` / `GetAllSnapshots` / `GetFiles`** — read-only live views;
   `GetFiles` returns `null` for an unknown hash and an empty list for a torrent
   whose metadata has not yet arrived.
+- **`TorrentCount`** — how many torrents are registered, without building a snapshot
+  per torrent. It is the emptiness check the background loops use to skip a tick
+  that has nothing to act on (see [VPN isolation](../vpn-isolation/feature.md)).
 
 State is held in three concurrent dictionaries keyed by info hash (managers,
 completion-raised guard, and `addedAt`), all cleaned up together in `RemoveAsync`.
@@ -87,7 +89,7 @@ three engine events the broadcaster forwards onto SSE:
 ## Snapshot derivation
 
 `ToSnapshot` computes the live view (see the
-[Control API snapshot table](control-api.md#the-per-torrent-snapshot) for field
+[Control API snapshot table](../control-api/feature.md#the-per-torrent-snapshot) for field
 semantics). The non-obvious parts:
 
 - **Size** — `Torrent.Size` once known, else the magnet's advertised size, else `0`.
@@ -119,7 +121,7 @@ The engine ships in a Native AOT binary. `ClientEngine.SaveStateAsync()` seriali
 which the trimmer cannot see, so `TorrentEngine.Api.csproj` roots the
 **`MonoTorrent.Client`** assembly (the one that actually defines `Serializer` +
 `EngineSettings` — not the `MonoTorrent` facade) with `TrimmerRootAssembly` so state
-persistence keeps working. See [Build and deployment](build-and-deployment.md).
+persistence keeps working. See [Build and deployment](../build-and-deployment.md).
 
 ## Testing Expectations
 

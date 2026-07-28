@@ -15,8 +15,8 @@ and no longer ships an in-process engine. Running the engine here solves two pro
 
 Full documentation lives in [`docs/`](docs/root.md) — start at
 [`docs/root.md`](docs/root.md) for the architecture overview, then the per-subsystem
-feature docs ([control API](docs/features/control-api.md),
-[VPN isolation](docs/features/vpn-isolation.md),
+feature docs ([control API](docs/features/control-api/feature.md),
+[VPN isolation](docs/features/vpn-isolation/feature.md),
 [downloads mounts](docs/features/downloads-mounts.md),
 [consumer integration](docs/features/consumer-integration.md), and more).
 

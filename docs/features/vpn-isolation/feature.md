@@ -1,8 +1,7 @@
 # VPN Isolation and Killswitch
 
-Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-03
+Updated: 2026-07-28
 
 ## Description
 
@@ -16,7 +15,7 @@ pause/resume downloads around outages.
 
 The operator supplies their own VPN — the engine bundles none. Running OpenVPN and
 rewriting iptables inside the container requires `NET_ADMIN` and `/dev/net/tun`,
-granted through the [manifest](hosty-runtime-app.md).
+granted through the [manifest](../hosty-runtime-app.md).
 
 > **First cut — leak-test before trusting it.** The killswitch rules are a first
 > implementation and must be validated in a real VPN environment (kill the tunnel;
@@ -143,6 +142,14 @@ torrents added *during* an outage are handled too):
   user pause/stop/remove made during the outage. A torrent removed mid-outage
   resumes to a no-op.
 
+A tick with **no torrents registered and none of this gate's own pauses outstanding**
+returns before reading the tunnel: neither branch could act on anything, and
+`GetStatus()` enumerates every network interface, so on an idle engine that would be
+12 pointless enumerations a minute. The gated-pause half of the condition matters —
+a torrent removed mid-outage leaves its hash behind, and skipping then would strand
+it. When there *is* something to act on the tunnel is still read live every 5s, so
+outage detection keeps its latency.
+
 The killswitch already blocks the traffic; the gate is about state hygiene and not
 spinning on connections that cannot leave.
 
@@ -160,7 +167,7 @@ flowchart LR
 
 A consumer seeds status on connect with `GET /vpn`, then receives `vpn` SSE events
 as it changes; it can also gate its own readiness on `connected` while the tunnel
-comes up (see [Consumer integration](consumer-integration.md)).
+comes up (see [Consumer integration](../consumer-integration.md)).
 
 ## Open questions
 
@@ -190,3 +197,5 @@ not by unit tests. Unit-testable pieces, with xUnit and Imposter:
   nulls).
 - `VpnDownloadGate` reconcile logic: pauses active torrents when down, resumes only
   its own paused set when restored, respects a concurrent user pause/stop/remove.
+- The idle skip: a pass with nothing registered and nothing gated touches the engine
+  not at all, while a pass that still owns a paused hash runs even at zero torrents.

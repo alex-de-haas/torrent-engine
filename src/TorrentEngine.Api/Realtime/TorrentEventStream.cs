@@ -20,6 +20,10 @@ public sealed class TorrentEventStream
 {
     private readonly ConcurrentDictionary<Guid, Channel<TorrentEvent>> _subscribers = new();
 
+    /// <summary>Whether any <c>GET /events</c> subscriber is currently attached. Lets
+    /// <see cref="TorrentProgressBroadcaster"/> skip building snapshots nobody would receive.</summary>
+    public bool HasSubscribers => !_subscribers.IsEmpty;
+
     public (Guid Id, ChannelReader<TorrentEvent> Reader) Subscribe()
     {
         var channel = Channel.CreateBounded<TorrentEvent>(
