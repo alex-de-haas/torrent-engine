@@ -398,6 +398,8 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     public IReadOnlyList<TorrentSnapshot> GetAllSnapshots() =>
         _managers.Select(pair => ToSnapshot(pair.Key, pair.Value, AddedAtOf(pair.Key))).ToList();
 
+    public int TorrentCount => _managers.Count;
+
     // GetOrAdd so a snapshot that races ahead of AddAsync's TryAdd still gets a stable timestamp for the
     // rest of the session, rather than a fresh UtcNow on every call. Only ever called for a hash that is in
     // _managers (and cleaned up alongside it in RemoveAsync), so this never leaks stray entries.

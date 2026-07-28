@@ -32,7 +32,7 @@ The consumer wires the engine by its `control` endpoint in its own manifest:
 Core injects the resolved base URL into the consumer, named after the endpoint
 alias — for Media Server, `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`. The consumer points
 its HTTP client at that value; no address, port, or origin is hard-coded. The client
-then speaks the [Control API](control-api.md): `POST /downloads` to add,
+then speaks the [Control API](control-api/feature.md): `POST /downloads` to add,
 `GET /downloads[/{infoHash}]` to poll, the pause/resume/stop/remove verbs to
 control, and `GET /events` to consume progress and transitions as they happen.
 
@@ -61,7 +61,7 @@ guarantee the engine is present. A consumer should therefore degrade gracefully:
 - Gate readiness on the engine while the tunnel comes up: poll `GET /healthz`
   (liveness) and `GET /vpn` (`connected`), and hold off adding downloads until the
   tunnel is up. Seed VPN state from `GET /vpn` on connect, then track `vpn` SSE
-  events (see [VPN isolation](vpn-isolation.md)).
+  events (see [VPN isolation](vpn-isolation/feature.md)).
 
 ## Re-driving off remote events
 
@@ -86,5 +86,5 @@ Do not expose the control port publicly.
 The cross-app wiring (dependency resolution, the injected URL, mount-label sharing)
 is validated at the Hosty runtime level on the consumer side, not by this app's unit
 tests. On the engine side, the control API and mount-label contracts consumers rely
-on are covered by [Control API](control-api.md) and
+on are covered by [Control API](control-api/feature.md) and
 [Downloads mounts](downloads-mounts.md) tests.

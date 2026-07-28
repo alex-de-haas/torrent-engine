@@ -36,10 +36,20 @@ public sealed class VpnDownloadGate(
         }
     }
 
-    private async Task ReconcileAsync(CancellationToken cancellationToken)
+    /// <summary>One reconcile pass. Internal so the tests can drive it directly instead of waiting on
+    /// <see cref="ReconcileInterval"/>.</summary>
+    internal async Task ReconcileAsync(CancellationToken cancellationToken)
     {
         try
         {
+            // With no torrents registered and none of ours left paused there is nothing either branch
+            // below could act on. Skip before reading the tunnel: monitor.GetStatus() enumerates every
+            // network interface, and on an idle engine that is 12 pointless enumerations a minute.
+            if (engine.TorrentCount == 0 && _gatedPaused.Count == 0)
+            {
+                return;
+            }
+
             if (!monitor.GetStatus().Connected)
             {
                 // Tunnel down: pause anything still transferring — including torrents added during the

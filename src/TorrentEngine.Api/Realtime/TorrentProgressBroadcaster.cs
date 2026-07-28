@@ -28,18 +28,7 @@ public sealed class TorrentProgressBroadcaster(
             using var timer = new PeriodicTimer(ProgressInterval);
             while (await timer.WaitForNextTickAsync(stoppingToken))
             {
-                try
-                {
-                    foreach (var snapshot in engine.GetAllSnapshots())
-                    {
-                        stream.Publish(new TorrentEvent("progress", snapshot.InfoHash, snapshot));
-                    }
-                }
-                catch (Exception exception)
-                {
-                    // A transient engine error must not kill the broadcast loop forever.
-                    logger.LogError(exception, "Error broadcasting periodic torrent progress.");
-                }
+                PublishProgressTick();
             }
         }
         catch (OperationCanceledException)
@@ -52,6 +41,31 @@ public sealed class TorrentProgressBroadcaster(
             engine.DownloadCompleted -= OnDownloadCompleted;
             engine.DownloadErrored -= OnDownloadErrored;
             vpn.StatusChanged -= OnVpnStatusChanged;
+        }
+    }
+
+    /// <summary>One periodic tick: a <c>progress</c> frame per registered torrent. Internal so the tests
+    /// can drive a tick directly instead of waiting on <see cref="ProgressInterval"/>.</summary>
+    internal void PublishProgressTick()
+    {
+        // Nothing is listening — skip the tick rather than build (and immediately drop) a snapshot per
+        // torrent. Publish is already a no-op without subscribers, so this only removes wasted work.
+        if (!stream.HasSubscribers)
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (var snapshot in engine.GetAllSnapshots())
+            {
+                stream.Publish(new TorrentEvent("progress", snapshot.InfoHash, snapshot));
+            }
+        }
+        catch (Exception exception)
+        {
+            // A transient engine error must not kill the broadcast loop forever.
+            logger.LogError(exception, "Error broadcasting periodic torrent progress.");
         }
     }
 

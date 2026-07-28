@@ -25,7 +25,7 @@ A two-stage build from the repo root:
   so the image is much smaller than the aspnet base. It adds `openvpn`, `iptables`,
   and `iproute2` for the tunnel + killswitch, copies the binary and
   `docker/entrypoint.sh`, sets `ASPNETCORE_URLS=http://+:8080`, exposes `8080`, and
-  runs the entrypoint. See [VPN isolation](vpn-isolation.md) for what the entrypoint
+  runs the entrypoint. See [VPN isolation](vpn-isolation/feature.md) for what the entrypoint
   does before it `exec`s the API.
 
 The container needs `NET_ADMIN` and `/dev/net/tun` at runtime, granted through the
@@ -44,7 +44,7 @@ serialization or runtime code-gen:
   `ClientEngine.SaveStateAsync()` serializes `EngineSettings` reflectively; that
   assembly (not the `MonoTorrent` facade) is the one that defines `Serializer` +
   `EngineSettings`, so it is the correct root. Without it, fast-resume/state
-  persistence would break under AOT. See [Torrent engine](torrent-engine.md#native-aot-note).
+  persistence would break under AOT. See [Torrent engine](torrent-engine/feature.md#native-aot-note).
 
 ## CI (`.github/workflows/ci.yml`)
 
@@ -105,4 +105,4 @@ derivation, and mount-label logic; the tunnel/killswitch require the docker runt
 CI runs the xUnit suite on every push/PR. The AOT publish is exercised by the
 `publish` workflow (a build failure there catches trimming/AOT regressions such as a
 missing trimmer root). Tunnel/killswitch behavior is validated at the runtime level
-(leak tests), not in CI — see [VPN isolation](vpn-isolation.md).
+(leak tests), not in CI — see [VPN isolation](vpn-isolation/feature.md).

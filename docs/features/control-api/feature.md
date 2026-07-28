@@ -1,8 +1,7 @@
 # Control API
 
-Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-20
+Updated: 2026-07-28
 
 ## Description
 
@@ -14,7 +13,7 @@ never reached directly. Engine records (`TorrentDescriptor`, `TorrentSnapshot`,
 `TorrentFileInfo`) are returned on the wire as-is; there is no separate DTO layer.
 
 The API is stateless per request. It is unauthenticated (the endpoint is
-non-public; see [Consumer integration](consumer-integration.md)); caller
+non-public; see [Consumer integration](../consumer-integration.md)); caller
 authentication is deferred to the platform's cross-app auth mechanism — peer
 introspection of the app service token, proposed in the Hosty repo as
 `docs/ideas/cross-app-auth.md`. An interim `CONTROL_API_TOKEN` shared-secret check
@@ -53,7 +52,7 @@ Body (`AddDownloadRequest`); provide **exactly one** of `magnet` / `torrentBase6
 | --- | --- | --- |
 | `magnet` | string? | Magnet URI. Mutually exclusive with `torrentBase64`. |
 | `torrentBase64` | string? | A `.torrent` file, base64-encoded. |
-| `mountLabel` | string? | Selects the downloads mount a relative `savePath` resolves against. Required when several mounts are configured; optional with exactly one. See [Downloads mounts](downloads-mounts.md). |
+| `mountLabel` | string? | Selects the downloads mount a relative `savePath` resolves against. Required when several mounts are configured; optional with exactly one. See [Downloads mounts](../downloads-mounts.md). |
 | `savePath` | string? | Save directory relative to the selected mount root. Omitted → the mount root itself. An absolute path or `../` traversal outside the root is a `400`. |
 | `maxDownloadRate` | int? | Bytes/sec, `0` = unlimited. Falls back to the engine default (`TORRENT_MAX_DOWNLOAD_SPEED`) when omitted. Negative → `400`. |
 | `maxUploadRate` | int? | Bytes/sec, `0` = unlimited. Falls back to `TORRENT_MAX_UPLOAD_SPEED`. Negative → `400`. |
@@ -117,7 +116,7 @@ rest are additive, so existing consumers keep working.
 `availablePeers` versus `peers` is the quickest read on why a torrent is slow: many
 peers discovered but few connected points at NAT / port-forwarding behind the VPN
 rather than a discovery (tracker/DHT) problem. See
-[Torrent engine](torrent-engine.md) for how these are derived.
+[Torrent engine](../torrent-engine/feature.md) for how these are derived.
 
 ## SSE event stream (`GET /events`)
 
@@ -132,7 +131,7 @@ data: {"type":"progress","infoHash":"abc…","snapshot":{…},"vpn":null}
 
 | Event | When | Payload |
 | --- | --- | --- |
-| `progress` | Every 1.5s, one frame per torrent | `snapshot` set, `vpn` null |
+| `progress` | Every 1.5s, one frame per torrent (only while at least one subscriber is attached) | `snapshot` set, `vpn` null |
 | `metadata-received` | A magnet's file list becomes available | `snapshot` set |
 | `completed` | A torrent finishes (transition to a complete/seeding state; raised once) | `snapshot` set |
 | `errored` | A torrent enters the error state | `snapshot` set |
@@ -148,6 +147,9 @@ slow reader drops its own oldest frames instead of blocking the broadcaster or o
 subscribers. Because `progress` re-broadcasts a full snapshot every tick, a dropped
 frame is self-healing — the next tick carries current state. The periodic tick and
 the engine-event/VPN forwarding are done by `Realtime/TorrentProgressBroadcaster.cs`.
+With **no subscriber attached** the periodic tick skips building snapshots entirely
+— publishing to an empty hub was already a no-op, so nothing observable changes; it
+only stops the engine from being polled 40 times a minute for frames nobody reads.
 There is no server→client backfill or replay: a client that connects mid-download
 gets the next `progress` tick, and should seed initial state from `GET /downloads`
 and `GET /vpn`.
@@ -178,3 +180,5 @@ an in-memory `TestServer`. Required coverage:
 - Idempotent pause/resume/stop/remove for an unknown hash (`204` no-op).
 - SSE framing: correct `event:`/`data:` lines and `TorrentEvent` shape per event
   type.
+- The progress tick: no subscribers → the engine is not read at all; one subscriber
+  → one `progress` frame per registered torrent.

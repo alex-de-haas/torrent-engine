@@ -1,8 +1,7 @@
 # VPN Isolation and Killswitch
 
-Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-03
+Updated: 2026-07-28
 
 ## Description
 
@@ -16,12 +15,11 @@ pause/resume downloads around outages.
 
 The operator supplies their own VPN — the engine bundles none. Running OpenVPN and
 rewriting iptables inside the container requires `NET_ADMIN` and `/dev/net/tun`,
-granted through the [manifest](hosty-runtime-app.md).
+granted through the [manifest](../hosty-runtime-app.md).
 
-> **First cut — leak-test before trusting it.** The killswitch rules are a first
-> implementation and must be validated in a real VPN environment (kill the tunnel;
-> confirm no peer traffic egresses the bridge) before use where a leak matters. See
-> [Open questions](#open-questions).
+> **Not yet leak-tested.** The killswitch rules are a first implementation, verified
+> by reading them rather than by observing traffic on a tunnel drop. Treat them as
+> unproven where a leak matters. The validation work is tracked in [plan.md](plan.md).
 
 ## Container startup (`docker/entrypoint.sh`)
 
@@ -143,6 +141,14 @@ torrents added *during* an outage are handled too):
   user pause/stop/remove made during the outage. A torrent removed mid-outage
   resumes to a no-op.
 
+A tick with **no torrents registered and none of this gate's own pauses outstanding**
+returns before reading the tunnel: neither branch could act on anything, and
+`GetStatus()` enumerates every network interface, so on an idle engine that would be
+12 pointless enumerations a minute. The gated-pause half of the condition matters —
+a torrent removed mid-outage leaves its hash behind, and skipping then would strand
+it. When there *is* something to act on the tunnel is still read live every 5s, so
+outage detection keeps its latency.
+
 The killswitch already blocks the traffic; the gate is about state hygiene and not
 spinning on connections that cannot leave.
 
@@ -160,23 +166,23 @@ flowchart LR
 
 A consumer seeds status on connect with `GET /vpn`, then receives `vpn` SSE events
 as it changes; it can also gate its own readiness on `connected` while the tunnel
-comes up (see [Consumer integration](consumer-integration.md)).
+comes up (see [Consumer integration](../consumer-integration.md)).
 
-## Open questions
+## Known limitations
 
-- **Killswitch hardening.** The iptables/ip6tables rules are a first cut and need leak
-  tests on tunnel drop in a real VPN environment before privacy-sensitive use.
-- **Killswitch scope.** IPv6 is now default-denied and the engine binds IPv4-only, so
-  v6 no longer leaks around the tunnel. Still assumed: a single default-route bridge
-  interface, and an **IPv4** `remote` endpoint (a v6-only `remote` is not reachable
-  under the v6 default-deny — allow it explicitly if needed). Multi-homed setups are
-  not covered.
-- **Reconnect DNS.** The VPN `remote` is pinned into `/etc/hosts` at boot so an OpenVPN
-  reconnect (with the tunnel — and thus its DNS — down) still resolves it. A `remote`
-  whose IP changes while the tunnel is down would still need a container restart.
-- **Telemetry egress.** The collector allowance is best-effort and depends on the
-  collector being reachable via the original bridge gateway; validate exports actually
-  arrive when enabling observability.
+What the current rules do and do not cover:
+
+- **Network topology.** The entrypoint assumes a **single default-route bridge
+  interface**. Multi-homed setups are outside what the killswitch reasons about.
+- **`remote` address family.** The VPN endpoint allowance is written for an **IPv4**
+  `remote`. A v6-only `remote` is unreachable under the IPv6 default-deny and needs
+  an explicit rule.
+- **Reconnect DNS.** The `remote` is pinned into `/etc/hosts` at boot, so an OpenVPN
+  reconnect resolves it even with the tunnel (and thus its DNS) down. A `remote`
+  whose IP changes while the tunnel is down needs a container restart.
+- **Collector reachability.** The telemetry allowance depends on the collector being
+  reachable via the original bridge gateway; where it is not, exports are dropped by
+  the killswitch rather than falling back.
 
 ## Testing Expectations
 
@@ -190,3 +196,5 @@ not by unit tests. Unit-testable pieces, with xUnit and Imposter:
   nulls).
 - `VpnDownloadGate` reconcile logic: pauses active torrents when down, resumes only
   its own paused set when restored, respects a concurrent user pause/stop/remove.
+- The idle skip: a pass with nothing registered and nothing gated touches the engine
+  not at all, while a pass that still owns a paused hash runs even at zero torrents.
