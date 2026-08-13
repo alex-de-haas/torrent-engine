@@ -47,11 +47,16 @@ Modelled on `VpnStatus` / `GET /vpn`:
 
 - A `DhtStatus` snapshot: `Enabled` (the `TORRENT_ENABLE_DHT` setting), `Running`
   (an engine exists and DHT is started), `State`, `NodeCount`.
-- "Enabled but not working" is derivable as `Enabled && Running && State != Ready`.
-- Two states must not be conflated with "broken":
+- "Enabled but not working" is `Enabled && Running && State == NotReady`. It must key
+  off `NotReady` specifically, **not** `State != Ready`: `Initialising` is the normal
+  startup state, so the looser predicate would report DHT as broken during every
+  bootstrap.
+- Three states must not be conflated with "broken":
   - **No engine.** Under [engine recycling](../torrent-engine/plan.md) the engine —
     and therefore DHT — does not exist while no torrents are registered. That is
     `Running: false`, not a failure.
+  - **Still starting.** `Initialising` is DHT coming up; it is reported as its own
+    state and is exactly what distinguishes a slow start from a failed bootstrap.
   - **`NotReady` can self-heal.** Peers found via trackers/PEX send `PORT` messages
     that seed the routing table, flipping the state to `Ready`. The status reports
     the current state, not a verdict.
@@ -64,8 +69,8 @@ Modelled on `VpnStatus` / `GET /vpn`:
 - [ ] SSE push on `StateChanged`: a `dht` event carried by a new nullable `Dht`
       field on `TorrentEvent` (the same pattern as the `Vpn` field), with
       `DhtStatus` registered in `AppJsonSerializerContext`.
-- [ ] Tests: status with no engine, with DHT disabled, and state/node-count mapping
-      with an engine present.
+- [ ] Tests: status with no engine, with DHT disabled, state/node-count mapping with
+      an engine present, and `Initialising` reported as starting rather than broken.
 - [ ] Docs: `feature.md` for this folder; cross-link from the torrent-engine docs.
 - [ ] Version bump (minor — new functionality while in `0.x`).
 

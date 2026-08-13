@@ -9,10 +9,14 @@ Updated: 2026-08-13
 Stop paying for a MonoTorrent engine that has nothing to do, and give the operator a
 switch to turn DHT off deliberately.
 
-An idle engine — API up, zero torrents registered — burns ~4.7% of a CPU core.
-Roughly 3 points of that are the `ClientEngine`'s own background work, almost
-entirely its DHT engine spinning. Measured with an isolated probe using this app's
-`EngineSettings` and no torrents:
+Two separate measurements motivate this, and they must not be read as one dataset.
+
+**In the deployed container**, an idle app — API up, zero torrents registered — burns
+~4.7% of a CPU core (`docker stats`, plus per-thread jiffy deltas under
+`/proc/1/task`). That is the whole process, not the engine alone.
+
+**In an isolated probe** using this app's `EngineSettings` and no torrents, the
+`ClientEngine`'s own idle cost is:
 
 | State | CPU (one core) |
 | --- | --- |
@@ -21,9 +25,14 @@ entirely its DHT engine spinning. Measured with an isolated probe using this app
 | Engine alive, DHT on | 2.58% |
 | Engine disposed (was DHT on) | 0.01% |
 
-So tearing the engine down when the roster is empty reclaims **2.57 pp** — the whole
-cost, and slightly more than switching DHT off while keeping the engine alive
-(2.31 pp), because an idle engine is not free either.
+Within the probe, tearing the engine down when the roster is empty reclaims
+**2.57 pp** — the engine's entire idle cost, and slightly more than switching DHT off
+while keeping it alive (2.31 pp), because an idle engine is not free either. Almost
+all of it is the DHT engine spinning.
+
+How much of the container's 4.7% this removes is what the verification step below
+measures; the probe predicts roughly 2.5 pp, but the two setups differ and the
+container figure is not simply the probe's number plus a constant.
 
 ## Approach: recycle the engine, do not special-case DHT
 
@@ -138,9 +147,11 @@ health so the problem is visible at all — is separate work, tracked in the
 
 ## Verification
 
-- Idle container CPU with zero torrents, before and after: expect roughly 4.7% → 1.5%
-  of a core (`docker stats`, plus the per-thread jiffy deltas under `/proc/1/task`
-  that attributed the cost in the first place).
+- Idle container CPU with zero torrents, before and after (`docker stats`, plus the
+  per-thread jiffy deltas under `/proc/1/task` that attributed the cost in the first
+  place). The probe predicts a drop of roughly 2.5 pp against the ~4.7% baseline;
+  measuring the actual delta is the point of the check, since that prediction comes
+  from a different setup.
 - Add a torrent → TCP+UDP appear on the configured port; remove the last one → both
   are released and the engine threads go away.
 - Add → remove → add repeatedly: no bind failure, no leaked engine instance.
