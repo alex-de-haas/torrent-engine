@@ -9,10 +9,17 @@ namespace TorrentEngine.Api.Torrents;
 
 /// <summary>
 /// MonoTorrent-backed <see cref="ITorrentEngine"/> and hosted service. Owns the <see cref="ClientEngine"/>,
-/// enables DHT/PEX/LSD and protocol encryption, and binds the configured raw torrent port (IPv4-only unless
-/// a bind address is set — the killswitch is the leak defense, but the engine also must not solicit v6). On
-/// shutdown it persists the torrent roster plus fast-resume/metadata under the app data dir, and on startup
-/// restores that roster and resumes the torrents, so downloads survive an engine restart.
+/// enables PEX/LSD (and DHT unless <see cref="TorrentEngineSettings.EnableDht"/> is off) plus protocol
+/// encryption, and binds the configured raw torrent port (IPv4-only unless a bind address is set — the
+/// killswitch is the leak defense, but the engine also must not solicit v6). On shutdown it persists the
+/// torrent roster plus fast-resume/metadata under the app data dir, and on startup restores that roster and
+/// resumes the torrents, so downloads survive an engine restart.
+/// <para>
+/// The engine exists only while at least one torrent is registered: it is constructed on the first add and
+/// disposed after the last removal, because an idle <see cref="ClientEngine"/> costs ~2.6% of a CPU core
+/// doing nothing. Everything that does not need it — <see cref="Inspect"/> and the read-only views — keeps
+/// working while it is absent.
+/// </para>
 /// </summary>
 public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposable
 {
@@ -28,6 +35,13 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     // unhandled "already registered" throw — the loser gets a DuplicateTorrentException (→ 409) instead.
     private readonly ConcurrentDictionary<string, byte> _registering = new(StringComparer.OrdinalIgnoreCase);
 
+    // Serializes every construction and teardown of the engine, so a concurrent add and remove can neither
+    // leak a second instance nor dispose one the other is still using. _engineUsers counts the operations
+    // currently holding the engine (guarded by _lifecycle): teardown waits until it drops to zero, which is
+    // what makes "dispose when the roster empties" safe while an add is in flight.
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
+    private int _engineUsers;
+
     private ClientEngine? _engine;
 
     public MonoTorrentEngine(TorrentEngineSettings settings, ILogger<MonoTorrentEngine> logger)
@@ -42,44 +56,44 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var port = _settings.Port;
-        var bindAddress = TryParseBindAddress(_settings.BindAddress);
-        var cacheDirectory = Path.Combine(_settings.AppDataDir, "torrent-engine");
-        Directory.CreateDirectory(cacheDirectory);
         foreach (var root in _settings.DownloadsRoots.Values)
         {
             Directory.CreateDirectory(root);
         }
 
-        var builder = new EngineSettingsBuilder
-        {
-            CacheDirectory = cacheDirectory,
-            AllowPortForwarding = _settings.EnablePortMapping,
-            AllowLocalPeerDiscovery = true,
-            AutoSaveLoadFastResume = true,
-            AutoSaveLoadMagnetLinkMetadata = true,
-            AllowedEncryption = [EncryptionType.RC4Header, EncryptionType.RC4Full, EncryptionType.PlainText],
-            MaximumDownloadRate = _settings.MaxDownloadSpeed,
-            MaximumUploadRate = _settings.MaxUploadSpeed,
-            ListenEndPoints = BuildListenEndPoints(bindAddress, port),
-            DhtEndPoint = new IPEndPoint(bindAddress ?? IPAddress.Any, port),
-        };
-        var settings = builder.ToSettings();
-
         // Restore the torrent roster persisted on the previous shutdown so downloads survive an engine-only
         // restart (StopAsync writes it via SaveStateAsync). Per-torrent fast-resume/metadata is already
         // persisted under the cache dir, so a restored torrent resumes without a full re-hash. A missing or
-        // corrupt state file is non-fatal — fall back to a fresh engine rather than failing startup.
-        var restored = await RestoreEngineAsync(settings);
-        _engine = restored ?? new ClientEngine(settings);
+        // corrupt state file is non-fatal — fall back to no engine rather than failing startup.
+        //
+        // This is the only place the state file is read: an engine constructed later in the session
+        // (AcquireEngineAsync) always starts empty, so recycling can never resurrect a stale roster.
+        var restored = await RestoreEngineAsync(BuildEngineSettings());
+        if (restored is not null && restored.Torrents.Count == 0)
+        {
+            // A state file that lists nothing must not keep an idle engine alive — that idle cost is exactly
+            // what this lifecycle exists to avoid.
+            restored.Dispose();
+            restored = null;
+        }
+
+        _engine = restored;
+        if (restored is null)
+        {
+            _logger.LogInformation(
+                "Torrent engine ready on port {Port} (port mapping: {PortMapping}, DHT: {Dht}); no torrents restored, so no engine is running until the first add.",
+                _settings.Port, _settings.EnablePortMapping, _settings.EnableDht);
+            return;
+        }
 
         var restoredCount = 0;
-        foreach (var manager in _engine.Torrents.ToList())
+        foreach (var manager in restored.Torrents.ToList())
         {
             var infoHash = HashOf(manager.InfoHashes);
             _managers[infoHash] = manager;
             _addedAt.TryAdd(infoHash, DateTimeOffset.UtcNow);
             manager.TorrentStateChanged += OnTorrentStateChanged;
+            await ApplyDhtSettingAsync(infoHash, manager);
             // A restored torrent that is already complete will transition into Seeding on resume; mark its
             // completion as already raised so the restart doesn't re-fire a `completed` event for it.
             if (manager.Complete)
@@ -95,23 +109,164 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             restoredCount++;
         }
 
-        if (restoredCount > 0)
+        // Resume the restored torrents so an engine-only restart doesn't strand them stopped. The VPN
+        // gate re-pauses them on the next tick if the tunnel is down.
+        try
         {
-            // Resume the restored torrents so an engine-only restart doesn't strand them stopped. The VPN
-            // gate re-pauses them on the next tick if the tunnel is down.
-            try
-            {
-                await _engine.StartAllAsync();
-            }
-            catch (Exception exception)
-            {
-                _logger.LogWarning(exception, "Failed to resume one or more restored torrents.");
-            }
+            await restored.StartAllAsync();
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to resume one or more restored torrents.");
         }
 
         _logger.LogInformation(
-            "Torrent engine started on port {Port} (port mapping: {PortMapping}); restored {Count} torrent(s).",
-            port, _settings.EnablePortMapping, restoredCount);
+            "Torrent engine started on port {Port} (port mapping: {PortMapping}, DHT: {Dht}); restored {Count} torrent(s).",
+            _settings.Port, _settings.EnablePortMapping, _settings.EnableDht, restoredCount);
+    }
+
+    /// <summary>Whether a <see cref="ClientEngine"/> is currently constructed. Tracks the roster: false while
+    /// no torrent is registered. Exposed for the lifecycle tests, which have no other way to observe it.</summary>
+    internal bool IsEngineRunning => _engine is not null;
+
+    /// <summary>The per-torrent settings a registered torrent currently runs on, or <c>null</c> for an
+    /// unknown hash. Exposed so the tests can assert what a restored torrent ended up with.</summary>
+    internal TorrentSettings? SettingsOf(string infoHash) =>
+        _managers.TryGetValue(infoHash, out var manager) ? manager.Settings : null;
+
+    // A restored manager carries the per-torrent settings serialized on the previous run, and
+    // UpdateSettingsAsync on the engine refreshes only engine-level settings — so flipping
+    // TORRENT_ENABLE_DHT would otherwise never reach an already-registered torrent. Re-apply just that flag,
+    // rebuilding from the manager's own settings so per-download rate limits survive untouched.
+    private async Task ApplyDhtSettingAsync(string infoHash, TorrentManager manager)
+    {
+        if (manager.Settings.AllowDht == _settings.EnableDht)
+        {
+            return;
+        }
+
+        try
+        {
+            await manager.UpdateSettingsAsync(
+                new TorrentSettingsBuilder(manager.Settings) { AllowDht = _settings.EnableDht }.ToSettings());
+        }
+        catch (Exception exception)
+        {
+            // Non-fatal: the torrent keeps running on its persisted setting rather than failing startup.
+            _logger.LogWarning(
+                exception, "Could not apply the current DHT setting to restored torrent {InfoHash}.", infoHash);
+        }
+    }
+
+    // Per-torrent settings for an add. DHT is per-torrent as well as engine-wide, so TORRENT_ENABLE_DHT has
+    // to be applied here too — otherwise the engine binds no DHT endpoint while each torrent still asks for
+    // a lookup, which is the half-off state the setting exists to avoid.
+    internal TorrentSettings BuildTorrentSettings(TorrentLimits limits) =>
+        new TorrentSettingsBuilder
+        {
+            AllowDht = _settings.EnableDht,
+            AllowPeerExchange = true,
+            CreateContainingDirectory = true,
+            MaximumDownloadRate = limits.MaxDownloadRate,
+            MaximumUploadRate = limits.MaxUploadRate,
+        }.ToSettings();
+
+    // The engine settings, rebuilt for each construction so a recycled engine comes up on exactly the
+    // configuration the process started with. The cache dir is created here rather than once at startup, so a
+    // construction later in the session still works if it went missing underneath us.
+    internal EngineSettings BuildEngineSettings()
+    {
+        var port = _settings.Port;
+        var bindAddress = TryParseBindAddress(_settings.BindAddress);
+        var cacheDirectory = Path.Combine(_settings.AppDataDir, "torrent-engine");
+        Directory.CreateDirectory(cacheDirectory);
+
+        return new EngineSettingsBuilder
+        {
+            CacheDirectory = cacheDirectory,
+            AllowPortForwarding = _settings.EnablePortMapping,
+            AllowLocalPeerDiscovery = true,
+            AutoSaveLoadFastResume = true,
+            AutoSaveLoadMagnetLinkMetadata = true,
+            AllowedEncryption = [EncryptionType.RC4Header, EncryptionType.RC4Full, EncryptionType.PlainText],
+            MaximumDownloadRate = _settings.MaxDownloadSpeed,
+            MaximumUploadRate = _settings.MaxUploadSpeed,
+            ListenEndPoints = BuildListenEndPoints(bindAddress, port),
+            // A null endpoint is how MonoTorrent is told not to run DHT at all, so TORRENT_ENABLE_DHT=false
+            // binds no DHT socket rather than leaving a DHT engine spinning with nothing to announce.
+            DhtEndPoint = _settings.EnableDht ? new IPEndPoint(bindAddress ?? IPAddress.Any, port) : null,
+        }.ToSettings();
+    }
+
+    /// <summary>
+    /// Takes the engine for the duration of one operation, constructing it on demand when
+    /// <paramref name="createIfMissing"/> is set. The returned instance is guaranteed not to be disposed
+    /// before the matching <see cref="ReleaseEngineAsync"/>; callers that get a non-null engine must always
+    /// pair it with that call. Returns <c>null</c> only when there is no engine and none may be created.
+    /// </summary>
+    private async Task<ClientEngine?> AcquireEngineAsync(bool createIfMissing)
+    {
+        await _lifecycle.WaitAsync();
+        try
+        {
+            if (_engine is null && createIfMissing)
+            {
+                _engine = new ClientEngine(BuildEngineSettings());
+                _logger.LogInformation(
+                    "Torrent engine constructed on port {Port} for the first registered torrent.", _settings.Port);
+            }
+
+            if (_engine is not null)
+            {
+                _engineUsers++;
+            }
+
+            return _engine;
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    /// <summary>Ends a use taken by <see cref="AcquireEngineAsync"/>, disposing the engine once the last
+    /// torrent is gone and no other operation still holds it.</summary>
+    private async Task ReleaseEngineAsync()
+    {
+        await _lifecycle.WaitAsync();
+        try
+        {
+            _engineUsers--;
+            if (_engineUsers > 0 || !_managers.IsEmpty || _engine is null)
+            {
+                return;
+            }
+
+            var engine = _engine;
+            try
+            {
+                // Persist the now-empty roster before dropping the engine: StartAsync restores from this file,
+                // so leaving the previous one behind would resurrect the torrents that were just removed.
+                await engine.SaveStateAsync(StateFilePath);
+            }
+            catch (Exception exception)
+            {
+                // The write failed (a full or read-only data volume), and once the engine is gone the shutdown
+                // path has nothing left to persist. A surviving state file still lists the removed torrents,
+                // so delete it: with an empty roster, "restore nothing" is the correct outcome and the only
+                // one that keeps deleted downloads deleted.
+                _logger.LogWarning(exception, "Could not persist the empty roster while tearing down the idle engine; discarding the stale state file instead.");
+                DeleteStateFile();
+            }
+
+            engine.Dispose();
+            _engine = null;
+            _logger.LogInformation("Last torrent removed; torrent engine disposed until the next add.");
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
     }
 
     // Rebuilds the engine from the persisted state file when present, re-applying the freshly-computed
@@ -150,8 +305,17 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        if (_engine is not null)
+        // Not passing the shutdown token: an already-cancelled one must not stop us from persisting the
+        // roster. Taking the lifecycle lock keeps this off an engine another operation is tearing down.
+        await _lifecycle.WaitAsync(CancellationToken.None);
+        try
         {
+            if (_engine is null)
+            {
+                // Idle with no engine: the roster was already persisted as empty when the last torrent went.
+                return;
+            }
+
             try
             {
                 await _engine.StopAllAsync(TimeSpan.FromSeconds(10));
@@ -164,11 +328,32 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
                 _logger.LogWarning(exception, "Error while stopping the torrent engine.");
             }
         }
+        finally
+        {
+            _lifecycle.Release();
+        }
     }
 
     /// <summary>Path of the persisted engine roster (the torrent list + settings) written on shutdown and
     /// restored on startup. Lives alongside the fast-resume/metadata cache under the app data dir.</summary>
     private string StateFilePath => Path.Combine(_settings.AppDataDir, "torrent-engine", "engine-state.bin");
+
+    /// <summary>Drops the persisted roster. Used when it could not be rewritten as empty — an absent file
+    /// restores nothing, which is what an empty roster means anyway.</summary>
+    private void DeleteStateFile()
+    {
+        try
+        {
+            File.Delete(StateFilePath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(
+                exception,
+                "Could not delete the stale state file {StateFile}; a restart may restore torrents that were removed.",
+                StateFilePath);
+        }
+    }
 
     public TorrentDescriptor Inspect(TorrentSource source)
     {
@@ -199,17 +384,9 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     public async Task<TorrentDescriptor> AddAsync(
         TorrentSource source, string saveDirectory, TorrentLimits limits, bool autoStart, CancellationToken cancellationToken)
     {
-        var engine = RequireEngine();
         Directory.CreateDirectory(saveDirectory);
 
-        var torrentSettings = new TorrentSettingsBuilder
-        {
-            AllowDht = true,
-            AllowPeerExchange = true,
-            CreateContainingDirectory = true,
-            MaximumDownloadRate = limits.MaxDownloadRate,
-            MaximumUploadRate = limits.MaxUploadRate,
-        }.ToSettings();
+        var torrentSettings = BuildTorrentSettings(limits);
 
         // Parse the source (and read its info hash) before touching the engine, so we can atomically reserve
         // the hash and reject a concurrent duplicate add rather than let MonoTorrent throw "already registered".
@@ -252,44 +429,56 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
                 throw new DuplicateTorrentException(infoHash);
             }
 
-            TorrentManager manager;
-            TorrentDescriptor descriptor;
-            if (magnetLink is not null)
+            // This is the add that brings the engine up when the roster is empty. Holding the use until the
+            // finally below means a concurrent remove of the last torrent cannot dispose it mid-add; if this
+            // add then fails, releasing it tears the engine down again rather than leaving it idle.
+            var engine = await AcquireEngineAsync(createIfMissing: true)
+                ?? throw new InvalidOperationException("Torrent engine could not be created.");
+            try
             {
-                manager = await engine.AddAsync(magnetLink, saveDirectory, torrentSettings);
-                descriptor = new TorrentDescriptor(infoHash, magnetLink.Name, magnetLink.Size, HasMetadata: false, []);
-            }
-            else
-            {
-                // Map (and validate) the file list *before* mutating the engine: SafeRelative can reject a
-                // hostile torrent name/path, and it must not leave the torrent registered-but-unreachable.
-                var files = MapFiles(torrentFile!.Files, torrentFile.Name);
-                manager = await engine.AddAsync(torrentFile, saveDirectory, torrentSettings);
-                descriptor = new TorrentDescriptor(infoHash, torrentFile.Name, torrentFile.Size, HasMetadata: true, files);
-            }
+                TorrentManager manager;
+                TorrentDescriptor descriptor;
+                if (magnetLink is not null)
+                {
+                    manager = await engine.AddAsync(magnetLink, saveDirectory, torrentSettings);
+                    descriptor = new TorrentDescriptor(infoHash, magnetLink.Name, magnetLink.Size, HasMetadata: false, []);
+                }
+                else
+                {
+                    // Map (and validate) the file list *before* mutating the engine: SafeRelative can reject a
+                    // hostile torrent name/path, and it must not leave the torrent registered-but-unreachable.
+                    var files = MapFiles(torrentFile!.Files, torrentFile.Name);
+                    manager = await engine.AddAsync(torrentFile, saveDirectory, torrentSettings);
+                    descriptor = new TorrentDescriptor(infoHash, torrentFile.Name, torrentFile.Size, HasMetadata: true, files);
+                }
 
-            // Record the add time before exposing the manager, so any snapshot that observes the torrent also
-            // observes its AddedAt. TryAdd (not indexer assignment) so a value a racing snapshot already
-            // stabilized via AddedAtOf's GetOrAdd is not clobbered with a later timestamp.
-            _addedAt.TryAdd(infoHash, DateTimeOffset.UtcNow);
-            _managers[infoHash] = manager;
-            manager.TorrentStateChanged += OnTorrentStateChanged;
+                // Record the add time before exposing the manager, so any snapshot that observes the torrent
+                // also observes its AddedAt. TryAdd (not indexer assignment) so a value a racing snapshot
+                // already stabilized via AddedAtOf's GetOrAdd is not clobbered with a later timestamp.
+                _addedAt.TryAdd(infoHash, DateTimeOffset.UtcNow);
+                _managers[infoHash] = manager;
+                manager.TorrentStateChanged += OnTorrentStateChanged;
 
-            if (autoStart)
-            {
-                await manager.StartAsync();
-            }
+                if (autoStart)
+                {
+                    await manager.StartAsync();
+                }
 
-            if (!descriptor.HasMetadata)
-            {
-                _ = WaitForMetadataAsync(infoHash, manager);
-            }
-            else
-            {
-                RaiseMetadata(infoHash);
-            }
+                if (!descriptor.HasMetadata)
+                {
+                    _ = WaitForMetadataAsync(infoHash, manager);
+                }
+                else
+                {
+                    RaiseMetadata(infoHash);
+                }
 
-            return descriptor;
+                return descriptor;
+            }
+            finally
+            {
+                await ReleaseEngineAsync();
+            }
         }
         finally
         {
@@ -298,33 +487,47 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         }
     }
 
-    public async Task PauseAsync(string infoHash, CancellationToken cancellationToken)
-    {
-        if (_managers.TryGetValue(infoHash, out var manager))
-        {
-            await manager.PauseAsync();
-        }
-    }
+    public Task PauseAsync(string infoHash, CancellationToken cancellationToken) =>
+        WithManagerAsync(infoHash, static manager => manager.PauseAsync());
 
-    public async Task ResumeAsync(string infoHash, CancellationToken cancellationToken)
-    {
-        if (_managers.TryGetValue(infoHash, out var manager))
-        {
-            await manager.StartAsync();
-        }
-    }
+    public Task ResumeAsync(string infoHash, CancellationToken cancellationToken) =>
+        WithManagerAsync(infoHash, static manager => manager.StartAsync());
 
-    public async Task StopAsync(string infoHash, CancellationToken cancellationToken)
+    public Task StopAsync(string infoHash, CancellationToken cancellationToken) =>
+        WithManagerAsync(infoHash, static manager => manager.StopAsync());
+
+    /// <summary>
+    /// Runs an operation on a registered torrent's manager under an engine lease, and no-ops for an unknown
+    /// hash. The lease matters because MonoTorrent throws <see cref="InvalidOperationException"/> from
+    /// <c>PauseAsync</c>/<c>StartAsync</c> once the engine behind the manager is disposed, which a concurrent
+    /// removal of the last torrent would otherwise do mid-call. Read-only views deliberately take no lease:
+    /// every property they read stays valid after disposal.
+    /// </summary>
+    private async Task WithManagerAsync(string infoHash, Func<TorrentManager, Task> operation)
     {
-        if (_managers.TryGetValue(infoHash, out var manager))
+        if (!_managers.TryGetValue(infoHash, out var manager))
         {
-            await manager.StopAsync();
+            return;
+        }
+
+        var engine = await AcquireEngineAsync(createIfMissing: false);
+        if (engine is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await operation(manager);
+        }
+        finally
+        {
+            await ReleaseEngineAsync();
         }
     }
 
     public async Task RemoveAsync(string infoHash, bool deleteFiles, CancellationToken cancellationToken)
     {
-        var engine = RequireEngine();
         if (!_managers.TryGetValue(infoHash, out var manager))
         {
             DeleteResumeData(infoHash);
@@ -333,28 +536,47 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             return;
         }
 
+        // Never create an engine here: a registered torrent implies a running one, and a remove that
+        // constructed an engine only to tear it down again would be absurd. A null engine (the roster and the
+        // engine disagreeing, which the lifecycle lock is there to prevent) still cleans up the local state.
+        var engine = await AcquireEngineAsync(createIfMissing: false);
         try
         {
-            if (manager.State is not (TorrentState.Stopped or TorrentState.Stopping or TorrentState.Error))
+            if (engine is not null)
             {
-                await manager.StopAsync(TimeSpan.FromSeconds(10));
+                try
+                {
+                    if (manager.State is not (TorrentState.Stopped or TorrentState.Stopping or TorrentState.Error))
+                    {
+                        await manager.StopAsync(TimeSpan.FromSeconds(10));
+                    }
+                }
+                catch (Exception exception)
+                {
+                    // Removal must proceed regardless (ObjectDisposed/InvalidOperation/Canceled etc.).
+                    _logger.LogWarning(exception, "Stopping torrent {InfoHash} before removal failed; removing anyway.", infoHash);
+                }
+
+                var mode = (deleteFiles ? RemoveMode.DownloadedDataOnly : RemoveMode.KeepAllData) | RemoveMode.CacheDataOnly;
+                await engine.RemoveAsync(manager, mode);
+            }
+
+            // Drop the torrent from the roster before releasing the engine, so the release below sees the
+            // roster this removal leaves behind and tears the engine down when it was the last one.
+            _managers.TryRemove(infoHash, out _);
+            manager.TorrentStateChanged -= OnTorrentStateChanged;
+            _completionRaised.TryRemove(infoHash, out _);
+            _addedAt.TryRemove(infoHash, out _);
+
+            DeleteResumeData(infoHash);
+        }
+        finally
+        {
+            if (engine is not null)
+            {
+                await ReleaseEngineAsync();
             }
         }
-        catch (Exception exception)
-        {
-            // Removal must proceed regardless (ObjectDisposed/InvalidOperation/Canceled etc.).
-            _logger.LogWarning(exception, "Stopping torrent {InfoHash} before removal failed; removing anyway.", infoHash);
-        }
-
-        var mode = (deleteFiles ? RemoveMode.DownloadedDataOnly : RemoveMode.KeepAllData) | RemoveMode.CacheDataOnly;
-        await engine.RemoveAsync(manager, mode);
-
-        _managers.TryRemove(infoHash, out _);
-        manager.TorrentStateChanged -= OnTorrentStateChanged;
-        _completionRaised.TryRemove(infoHash, out _);
-        _addedAt.TryRemove(infoHash, out _);
-
-        DeleteResumeData(infoHash);
     }
 
     /// <summary>Deletes the persisted fast-resume file for an info hash, if present.</summary>
@@ -571,8 +793,9 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         return new Dictionary<string, IPEndPoint> { [key] = new IPEndPoint(bindAddress, port) };
     }
 
-    private ClientEngine RequireEngine() =>
-        _engine ?? throw new InvalidOperationException("Torrent engine has not started.");
-
-    public void Dispose() => _engine?.Dispose();
+    public void Dispose()
+    {
+        _engine?.Dispose();
+        _lifecycle.Dispose();
+    }
 }

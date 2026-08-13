@@ -1,7 +1,7 @@
 # Torrent Engine
 
 Created: 2026-07-03
-Updated: 2026-07-28
+Updated: 2026-08-13
 
 ## Description
 
@@ -15,34 +15,84 @@ owns **no** persistence beyond MonoTorrent's own fast-resume/metadata cache, and
 surfaces only live snapshots plus a few transition events.
 
 The engine is configured entirely from `TorrentEngineSettings` (see
-[Configuration](../configuration.md)); it never hard-codes ports or paths.
+[Configuration](../configuration/feature.md)); it never hard-codes ports or paths.
+
+## Engine lifecycle
+
+The `ClientEngine` exists only while at least one torrent is registered. An idle one
+costs ~2.6% of a CPU core doing nothing (almost all of it the DHT engine spinning),
+so:
+
+- **`StartAsync`** restores the persisted roster and keeps the engine only when that
+  roster is non-empty. With nothing to restore, the app starts with no engine at all.
+- **The first `AddAsync` constructs it** (~0.5ms warm, so the operator-visible latency
+  of the first add after an idle period is negligible).
+- **The removal that empties the roster disposes it**, immediately and with no linger.
+  Teardown keys off *registered* torrents, not active ones — a stopped torrent still
+  holds a manager the API can act on.
+
+A single lock serializes every construction and teardown, and counts the operations
+currently holding the engine, so a concurrent add and remove can neither leak a second
+instance nor dispose one the other is still using. `AddAsync`, `RemoveAsync` and the
+manager operations (`PauseAsync` / `ResumeAsync` / `StopAsync`) all take that lease for
+the duration of the call: MonoTorrent throws once the engine behind a manager is
+disposed, and a concurrent removal of the last torrent would otherwise do exactly that
+mid-call.
+
+Everything that does not need the engine keeps working while it is absent: `Inspect`
+parses sources as usual, and the read-only views (`GetSnapshot`, `GetAllSnapshots`,
+`GetFiles`, `TorrentCount`) report the empty roster they would report anyway. Those
+views deliberately take **no** lease — every manager property they read stays valid
+after the engine is disposed, so the hot progress-tick path stays lock-free. `GET
+/healthz` and `GET /vpn` never touch the engine and are unaffected.
+
+Only `StartAsync` reads the persisted state file, so an engine constructed later in
+the session always starts empty — recycling cannot resurrect a stale roster. The
+teardown persists the now-empty roster, so a later process restart does not bring back
+torrents that were removed; if that write fails (a full or read-only data volume), the
+stale file is deleted instead, because with an empty roster "restore nothing" is the
+correct outcome and the only one that keeps deleted downloads deleted.
 
 ## Engine configuration
 
-On `StartAsync`, the engine builds one `ClientEngine` from `EngineSettingsBuilder`:
+Each time the engine is constructed, it is built from `EngineSettingsBuilder`:
 
 - **Cache directory** — `{HOSTY_APP_DATA_DIR}/torrent-engine`. Holds MonoTorrent's
   fast-resume state and magnet-metadata cache, with `AutoSaveLoadFastResume` and
   `AutoSaveLoadMagnetLinkMetadata` on, so downloads and fetched metadata survive a
   restart. `StopAsync` calls `SaveStateAsync()` on shutdown.
 - **Listen endpoints** — the raw L4 torrent port (`TORRENT_PORT`, default `6881`,
-  TCP + UDP). With no bind address the engine listens on both `IPAddress.Any` and
-  `IPv6Any`; with a bind address set (e.g. a VPN tun address) it binds **only** that
-  address's family, so the port is not also re-exposed on every interface via
-  `IPv6Any`. The DHT endpoint uses the same address/port.
-- **Peer discovery** — DHT, Peer Exchange (PEX), and Local Peer Discovery are all
-  enabled. Under an in-container VPN the tunnel is the single egress; the provider
-  forwards the listen port for inbound peers.
+  TCP + UDP). With no bind address the engine listens on `IPAddress.Any` — IPv4 only,
+  because the engine must not solicit IPv6 peers that could bypass the (historically
+  IPv4-only) tunnel. With a bind address set (e.g. a VPN tun address) it binds **only**
+  that address's family. The DHT endpoint uses the same address/port.
+- **Peer discovery** — Peer Exchange (PEX) and Local Peer Discovery are always
+  enabled, and DHT is enabled unless `TORRENT_ENABLE_DHT` is `false`; all of them run
+  only while the engine does, i.e. while a torrent is registered. Under an
+  in-container VPN the tunnel is the single egress; the provider forwards the listen
+  port for inbound peers.
 - **Encryption** — `RC4Header`, `RC4Full`, and `PlainText` are all allowed
   (maximum peer compatibility).
 - **Port forwarding** — UPnP / NAT-PMP mapping is **off** by default
-  (`TORRENT_ENABLE_PORT_MAPPING`), since it is irrelevant behind a VPN.
+  (`TORRENT_ENABLE_PORT_MAPPING`), since it is irrelevant behind a VPN. Note that the
+  listen port is bound only while torrents are registered, so an operator
+  port-forwarding to this container finds the port closed while it sits idle.
 - **Global rate limits** — `MaximumDownloadRate` / `MaximumUploadRate` from the
   engine defaults (`0` = unlimited).
 
-Each torrent is added with per-torrent `TorrentSettings`: DHT and PEX on,
-`CreateContainingDirectory` on, and its own `MaximumDownloadRate` /
-`MaximumUploadRate` (the request's rates, or the engine defaults).
+Each torrent is added with per-torrent `TorrentSettings`: PEX on, DHT following
+`TORRENT_ENABLE_DHT`, `CreateContainingDirectory` on, and its own
+`MaximumDownloadRate` / `MaximumUploadRate` (the request's rates, or the engine
+defaults).
+
+`TORRENT_ENABLE_DHT=false` is a real off switch rather than a half-configured engine:
+no DHT endpoint is bound *and* each torrent carries `AllowDht` false, so peer
+discovery falls back to trackers, PEX and Local Peer Discovery.
+
+Changing the setting also reaches torrents that already exist. A restored manager
+carries the per-torrent settings serialized on the previous run, so `StartAsync`
+re-applies `AllowDht` to each one it restores — rebuilt from that manager's own
+settings, so per-download rate limits are left untouched.
 
 ## Lifecycle and operations
 
@@ -135,3 +185,18 @@ Backend tests use xUnit and Imposter. Required coverage:
   complete.
 - `RemoveAsync` clears fast-resume and per-hash bookkeeping, and tolerates a
   never-started / unknown hash.
+- The engine lifecycle: no engine at zero torrents, constructed on the first add,
+  disposed after the last removal, and rebuilt cleanly across repeated add/remove
+  cycles.
+- Concurrent adds and removes leave the engine's existence agreeing with the torrent
+  count, and never hand out a disposed engine.
+- `Inspect` and the read-only views work with no engine present, and a remove of an
+  unknown hash does not construct one.
+- A restart restores a non-empty roster, and restores nothing after the roster was
+  emptied — including when the teardown could not rewrite the state file and had to
+  discard it instead.
+- Manager operations are no-ops (and construct nothing) with no engine present.
+- A restored torrent picks up a changed `TORRENT_ENABLE_DHT` without losing its
+  per-download rate limits.
+- `TORRENT_ENABLE_DHT`: the default, a malformed value, and that `false` both leaves
+  the DHT endpoint unbound and carries `AllowDht` false onto added torrents.

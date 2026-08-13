@@ -80,7 +80,7 @@ Before it is functional, configure the required settings through the Shell:
   with the same label the consumer uses for its matching catalog root (see
   [Downloads mounts](downloads-mounts.md)).
 - Optionally `OPENVPN_USERNAME`/`OPENVPN_PASSWORD` and the `TORRENT_*` / `VPN_*`
-  knobs (see [Configuration](configuration.md)).
+  knobs (see [Configuration](configuration/feature.md)).
 
 Swap `main` for a release tag in the manifest URL to pin a specific build.
 

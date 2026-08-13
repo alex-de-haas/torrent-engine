@@ -27,6 +27,11 @@ public sealed class TorrentEngineSettings
     /// <summary>UPnP / NAT-PMP automatic port mapping. Off by default — irrelevant behind a VPN.</summary>
     public bool EnablePortMapping { get; init; }
 
+    /// <summary>Whether DHT runs at all. On by default. When off, no DHT endpoint is bound and added
+    /// torrents carry <c>AllowDht</c> false, so it is a real off switch rather than a half-configured
+    /// engine. Peer discovery then relies on trackers, PEX and Local Peer Discovery.</summary>
+    public bool EnableDht { get; init; } = true;
+
     /// <summary>Bytes/sec; 0 = unlimited.</summary>
     public int MaxDownloadSpeed { get; init; }
 
@@ -64,6 +69,7 @@ public sealed class TorrentEngineSettings
             Port = ReadInt("TORRENT_PORT", ReadInt("HOSTY_PORT_TORRENT", 6881)),
             BindAddress = Read("TORRENT_BIND_ADDRESS"),
             EnablePortMapping = ReadBool("TORRENT_ENABLE_PORT_MAPPING", false),
+            EnableDht = ReadBool("TORRENT_ENABLE_DHT", true),
             MaxDownloadSpeed = ReadInt("TORRENT_MAX_DOWNLOAD_SPEED", 0),
             MaxUploadSpeed = ReadInt("TORRENT_MAX_UPLOAD_SPEED", 0),
             MaxActiveTorrents = ReadInt("TORRENT_MAX_ACTIVE", 0),

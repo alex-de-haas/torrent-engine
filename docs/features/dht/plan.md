@@ -13,7 +13,7 @@ that magnet links without trackers never find peers.
 Today that state is invisible — and it is the *current* state of the deployment:
 `dht_nodes.cache` is an empty bencoded list, MonoTorrent 3.0.2 ships no bootstrap
 routers, so DHT sits at `NotReady` with an empty routing table (see the
-[interaction note](../torrent-engine/plan.md) in the engine recycling plan).
+[torrent engine](../torrent-engine/feature.md), whose recycling work measured it).
 
 ## What MonoTorrent exposes
 
@@ -52,7 +52,7 @@ Modelled on `VpnStatus` / `GET /vpn`:
   startup state, so the looser predicate would report DHT as broken during every
   bootstrap.
 - Three states must not be conflated with "broken":
-  - **No engine.** Under [engine recycling](../torrent-engine/plan.md) the engine —
+  - **No engine.** Under [engine recycling](../torrent-engine/feature.md) the engine —
     and therefore DHT — does not exist while no torrents are registered. That is
     `Running: false`, not a failure.
   - **Still starting.** `Initialising` is DHT coming up; it is reported as its own
@@ -90,9 +90,9 @@ Formerly open questions, resolved 2026-08-13:
 - **Bootstrap seeding is not part of this plan.** `IDht` exposes no methods and
   `ClientEngine` has no seeding hook (verified by probe), so seeding needs its own
   feasibility work — it becomes the next plan in this folder after status ships.
-- **Implemented after [engine recycling](../torrent-engine/plan.md) lands.** The
-  provider must tolerate an absent engine either way, but building against a
-  lifecycle that is about to change would be wasted motion.
+- **Implemented after [engine recycling](../torrent-engine/feature.md).** That
+  lifecycle has now shipped, so the provider is built against a settled one; it must
+  tolerate an absent engine, which is the normal idle state.
 
 ## Verification
 

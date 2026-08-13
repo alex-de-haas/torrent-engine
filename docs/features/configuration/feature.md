@@ -1,8 +1,7 @@
 # Configuration
 
-Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-20
+Updated: 2026-08-13
 
 ## Description
 
@@ -35,6 +34,7 @@ Defaults come from `manifest.json`; the operator sets them through the Hosty She
 | `TORRENT_PORT` | `6881` | Raw L4 listen port (TCP + UDP). Under the VPN, the port bound inside the tunnel. |
 | `TORRENT_BIND_ADDRESS` | (IPv4, all interfaces) | Bind the listen + DHT endpoint to one address (e.g. the VPN tun address). Unset → IPv4 `Any` only (the engine deliberately doesn't solicit IPv6). Set → binds **only** that address's family. |
 | `TORRENT_ENABLE_PORT_MAPPING` | `false` | UPnP / NAT-PMP automatic port mapping. Off by default (irrelevant behind a VPN). |
+| `TORRENT_ENABLE_DHT` | `true` | Peer discovery over the DHT. `false` binds no DHT endpoint **and** sets `AllowDht` false per torrent, leaving trackers, PEX and Local Peer Discovery. A malformed value falls back to the default. |
 | `TORRENT_MAX_DOWNLOAD_SPEED` | `0` | Global max download rate, bytes/sec (`0` = unlimited). Per-download `maxDownloadRate` overrides it. |
 | `TORRENT_MAX_UPLOAD_SPEED` | `0` | Global max upload rate, bytes/sec (`0` = unlimited). Per-download `maxUploadRate` overrides it. |
 | `TORRENT_MAX_ACTIVE` | `0` | Max concurrently-registered torrents (`0` = unlimited). An add beyond the cap is a `409`. |
