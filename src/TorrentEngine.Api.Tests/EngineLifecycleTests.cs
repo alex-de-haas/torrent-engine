@@ -39,9 +39,11 @@ public sealed class EngineLifecycleTests : IDisposable
 
     private static string HashOf(int seed) => $"{seed:x40}";
 
-    private Task<TorrentDescriptor> AddAsync(MonoTorrentEngine engine, int seed) =>
-        engine.AddAsync(Magnet(seed), Path.Combine(_appData, "downloads"), new TorrentLimits(0, 0),
+    private Task<TorrentDescriptor> AddAsync(MonoTorrentEngine engine, int seed, TorrentLimits? limits = null) =>
+        engine.AddAsync(Magnet(seed), Path.Combine(_appData, "downloads"), limits ?? new TorrentLimits(0, 0),
             autoStart: false, CancellationToken.None);
+
+    private string StateFile => Path.Combine(_appData, "torrent-engine", "engine-state.bin");
 
     [Fact]
     public async Task Start_WithNothingToRestore_RunsNoEngine()
@@ -124,9 +126,13 @@ public sealed class EngineLifecycleTests : IDisposable
 
         var churn = Enumerable.Range(1, 12).Select(seed => Task.Run(async () =>
         {
+            // Manager operations run alongside the churn: MonoTorrent throws once the engine behind a manager
+            // is disposed, so these racing a teardown is exactly the window the engine lease has to close.
+            await engine.PauseAsync(HashOf(seed), CancellationToken.None);
             await engine.RemoveAsync(HashOf(seed), deleteFiles: false, CancellationToken.None);
             // Immediately re-adding races the teardown that the removal above may have just triggered.
             await AddAsync(engine, seed);
+            await engine.StopAsync(HashOf(seed), CancellationToken.None);
             await engine.RemoveAsync(HashOf(seed), deleteFiles: false, CancellationToken.None);
         }));
         await Task.WhenAll(churn);
@@ -187,6 +193,67 @@ public sealed class EngineLifecycleTests : IDisposable
 
         Assert.False(second.IsEngineRunning);
         Assert.Equal(0, second.TorrentCount);
+    }
+
+    [Fact]
+    public async Task TeardownThatCannotPersistTheEmptyRoster_DiscardsTheStaleStateFile()
+    {
+        var first = NewEngine();
+        await first.StartAsync(CancellationToken.None);
+        await AddAsync(first, 1);
+        await first.StopAsync(CancellationToken.None); // persists a roster that lists torrent 1
+        Assert.True(File.Exists(StateFile));
+
+        var second = NewEngine();
+        await second.StartAsync(CancellationToken.None);
+        Assert.Equal(1, second.TorrentCount);
+
+        // Hold the state file exclusively so the teardown's rewrite fails the way a full or read-only data
+        // volume would. Leaving the old file behind would resurrect a download the user deleted.
+        using (new FileStream(StateFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            await second.RemoveAsync(HashOf(1), deleteFiles: false, CancellationToken.None);
+        }
+
+        Assert.False(File.Exists(StateFile));
+
+        var third = NewEngine();
+        await third.StartAsync(CancellationToken.None);
+        Assert.Equal(0, third.TorrentCount);
+    }
+
+    [Fact]
+    public async Task ManagerOperations_WithNoEngine_AreNoOpsAndConstructNothing()
+    {
+        var engine = NewEngine();
+        await engine.StartAsync(CancellationToken.None);
+
+        await engine.PauseAsync(HashOf(1), CancellationToken.None);
+        await engine.ResumeAsync(HashOf(1), CancellationToken.None);
+        await engine.StopAsync(HashOf(1), CancellationToken.None);
+
+        Assert.False(engine.IsEngineRunning);
+    }
+
+    [Fact]
+    public async Task RestoredTorrent_PicksUpAChangedDhtSetting_WithoutLosingItsRateLimits()
+    {
+        var first = NewEngine(enableDht: true);
+        await first.StartAsync(CancellationToken.None);
+        await AddAsync(first, 1, new TorrentLimits(MaxDownloadRate: 12345, MaxUploadRate: 0));
+        Assert.True(first.SettingsOf(HashOf(1))!.AllowDht);
+        await first.StopAsync(CancellationToken.None);
+
+        // The operator turns DHT off and restarts. A restored manager carries the settings serialized last
+        // time, so without re-applying it the torrent would keep asking for lookups DHT can no longer serve.
+        var second = NewEngine(enableDht: false);
+        await second.StartAsync(CancellationToken.None);
+
+        var restored = second.SettingsOf(HashOf(1));
+        Assert.NotNull(restored);
+        Assert.False(restored.AllowDht);
+        // Only the DHT flag may change — the per-download limit is the caller's, not the engine's.
+        Assert.Equal(12345, restored.MaximumDownloadRate);
     }
 
     [Fact]

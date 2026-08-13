@@ -93,6 +93,7 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             _managers[infoHash] = manager;
             _addedAt.TryAdd(infoHash, DateTimeOffset.UtcNow);
             manager.TorrentStateChanged += OnTorrentStateChanged;
+            await ApplyDhtSettingAsync(infoHash, manager);
             // A restored torrent that is already complete will transition into Seeding on resume; mark its
             // completion as already raised so the restart doesn't re-fire a `completed` event for it.
             if (manager.Complete)
@@ -127,6 +128,35 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     /// <summary>Whether a <see cref="ClientEngine"/> is currently constructed. Tracks the roster: false while
     /// no torrent is registered. Exposed for the lifecycle tests, which have no other way to observe it.</summary>
     internal bool IsEngineRunning => _engine is not null;
+
+    /// <summary>The per-torrent settings a registered torrent currently runs on, or <c>null</c> for an
+    /// unknown hash. Exposed so the tests can assert what a restored torrent ended up with.</summary>
+    internal TorrentSettings? SettingsOf(string infoHash) =>
+        _managers.TryGetValue(infoHash, out var manager) ? manager.Settings : null;
+
+    // A restored manager carries the per-torrent settings serialized on the previous run, and
+    // UpdateSettingsAsync on the engine refreshes only engine-level settings — so flipping
+    // TORRENT_ENABLE_DHT would otherwise never reach an already-registered torrent. Re-apply just that flag,
+    // rebuilding from the manager's own settings so per-download rate limits survive untouched.
+    private async Task ApplyDhtSettingAsync(string infoHash, TorrentManager manager)
+    {
+        if (manager.Settings.AllowDht == _settings.EnableDht)
+        {
+            return;
+        }
+
+        try
+        {
+            await manager.UpdateSettingsAsync(
+                new TorrentSettingsBuilder(manager.Settings) { AllowDht = _settings.EnableDht }.ToSettings());
+        }
+        catch (Exception exception)
+        {
+            // Non-fatal: the torrent keeps running on its persisted setting rather than failing startup.
+            _logger.LogWarning(
+                exception, "Could not apply the current DHT setting to restored torrent {InfoHash}.", infoHash);
+        }
+    }
 
     // Per-torrent settings for an add. DHT is per-torrent as well as engine-wide, so TORRENT_ENABLE_DHT has
     // to be applied here too — otherwise the engine binds no DHT endpoint while each torrent still asks for
@@ -221,7 +251,12 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
             }
             catch (Exception exception)
             {
-                _logger.LogWarning(exception, "Could not persist the empty roster while tearing down the idle engine.");
+                // The write failed (a full or read-only data volume), and once the engine is gone the shutdown
+                // path has nothing left to persist. A surviving state file still lists the removed torrents,
+                // so delete it: with an empty roster, "restore nothing" is the correct outcome and the only
+                // one that keeps deleted downloads deleted.
+                _logger.LogWarning(exception, "Could not persist the empty roster while tearing down the idle engine; discarding the stale state file instead.");
+                DeleteStateFile();
             }
 
             engine.Dispose();
@@ -302,6 +337,23 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     /// <summary>Path of the persisted engine roster (the torrent list + settings) written on shutdown and
     /// restored on startup. Lives alongside the fast-resume/metadata cache under the app data dir.</summary>
     private string StateFilePath => Path.Combine(_settings.AppDataDir, "torrent-engine", "engine-state.bin");
+
+    /// <summary>Drops the persisted roster. Used when it could not be rewritten as empty — an absent file
+    /// restores nothing, which is what an empty roster means anyway.</summary>
+    private void DeleteStateFile()
+    {
+        try
+        {
+            File.Delete(StateFilePath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(
+                exception,
+                "Could not delete the stale state file {StateFile}; a restart may restore torrents that were removed.",
+                StateFilePath);
+        }
+    }
 
     public TorrentDescriptor Inspect(TorrentSource source)
     {
@@ -435,27 +487,42 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
         }
     }
 
-    public async Task PauseAsync(string infoHash, CancellationToken cancellationToken)
-    {
-        if (_managers.TryGetValue(infoHash, out var manager))
-        {
-            await manager.PauseAsync();
-        }
-    }
+    public Task PauseAsync(string infoHash, CancellationToken cancellationToken) =>
+        WithManagerAsync(infoHash, static manager => manager.PauseAsync());
 
-    public async Task ResumeAsync(string infoHash, CancellationToken cancellationToken)
-    {
-        if (_managers.TryGetValue(infoHash, out var manager))
-        {
-            await manager.StartAsync();
-        }
-    }
+    public Task ResumeAsync(string infoHash, CancellationToken cancellationToken) =>
+        WithManagerAsync(infoHash, static manager => manager.StartAsync());
 
-    public async Task StopAsync(string infoHash, CancellationToken cancellationToken)
+    public Task StopAsync(string infoHash, CancellationToken cancellationToken) =>
+        WithManagerAsync(infoHash, static manager => manager.StopAsync());
+
+    /// <summary>
+    /// Runs an operation on a registered torrent's manager under an engine lease, and no-ops for an unknown
+    /// hash. The lease matters because MonoTorrent throws <see cref="InvalidOperationException"/> from
+    /// <c>PauseAsync</c>/<c>StartAsync</c> once the engine behind the manager is disposed, which a concurrent
+    /// removal of the last torrent would otherwise do mid-call. Read-only views deliberately take no lease:
+    /// every property they read stays valid after disposal.
+    /// </summary>
+    private async Task WithManagerAsync(string infoHash, Func<TorrentManager, Task> operation)
     {
-        if (_managers.TryGetValue(infoHash, out var manager))
+        if (!_managers.TryGetValue(infoHash, out var manager))
         {
-            await manager.StopAsync();
+            return;
+        }
+
+        var engine = await AcquireEngineAsync(createIfMissing: false);
+        if (engine is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await operation(manager);
+        }
+        finally
+        {
+            await ReleaseEngineAsync();
         }
     }
 

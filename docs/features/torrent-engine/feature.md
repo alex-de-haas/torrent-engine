@@ -33,17 +33,25 @@ so:
 
 A single lock serializes every construction and teardown, and counts the operations
 currently holding the engine, so a concurrent add and remove can neither leak a second
-instance nor dispose one the other is still using.
+instance nor dispose one the other is still using. `AddAsync`, `RemoveAsync` and the
+manager operations (`PauseAsync` / `ResumeAsync` / `StopAsync`) all take that lease for
+the duration of the call: MonoTorrent throws once the engine behind a manager is
+disposed, and a concurrent removal of the last torrent would otherwise do exactly that
+mid-call.
 
 Everything that does not need the engine keeps working while it is absent: `Inspect`
 parses sources as usual, and the read-only views (`GetSnapshot`, `GetAllSnapshots`,
-`GetFiles`, `TorrentCount`) report the empty roster they would report anyway. `GET
+`GetFiles`, `TorrentCount`) report the empty roster they would report anyway. Those
+views deliberately take **no** lease — every manager property they read stays valid
+after the engine is disposed, so the hot progress-tick path stays lock-free. `GET
 /healthz` and `GET /vpn` never touch the engine and are unaffected.
 
 Only `StartAsync` reads the persisted state file, so an engine constructed later in
 the session always starts empty — recycling cannot resurrect a stale roster. The
 teardown persists the now-empty roster, so a later process restart does not bring back
-torrents that were removed.
+torrents that were removed; if that write fails (a full or read-only data volume), the
+stale file is deleted instead, because with an empty roster "restore nothing" is the
+correct outcome and the only one that keeps deleted downloads deleted.
 
 ## Engine configuration
 
@@ -80,6 +88,11 @@ defaults).
 `TORRENT_ENABLE_DHT=false` is a real off switch rather than a half-configured engine:
 no DHT endpoint is bound *and* each torrent carries `AllowDht` false, so peer
 discovery falls back to trackers, PEX and Local Peer Discovery.
+
+Changing the setting also reaches torrents that already exist. A restored manager
+carries the per-torrent settings serialized on the previous run, so `StartAsync`
+re-applies `AllowDht` to each one it restores — rebuilt from that manager's own
+settings, so per-download rate limits are left untouched.
 
 ## Lifecycle and operations
 
@@ -180,6 +193,10 @@ Backend tests use xUnit and Imposter. Required coverage:
 - `Inspect` and the read-only views work with no engine present, and a remove of an
   unknown hash does not construct one.
 - A restart restores a non-empty roster, and restores nothing after the roster was
-  emptied.
+  emptied — including when the teardown could not rewrite the state file and had to
+  discard it instead.
+- Manager operations are no-ops (and construct nothing) with no engine present.
+- A restored torrent picks up a changed `TORRENT_ENABLE_DHT` without losing its
+  per-download rate limits.
 - `TORRENT_ENABLE_DHT`: the default, a malformed value, and that `false` both leaves
   the DHT endpoint unbound and carries `AllowDht` false onto added torrents.
