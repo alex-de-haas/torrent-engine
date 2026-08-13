@@ -40,8 +40,10 @@ Implemented:
   so lookups don't leak outside the VPN — and don't break when the host/docker resolver is
   no longer routable through the tunnel.
 - **MonoTorrent engine** (`src/TorrentEngine.Api/Torrents`) — ported from media-server,
-  decoupled from its DB/pipeline: DHT/PEX/LSD, protocol encryption, fast-resume/metadata
-  cache, per-torrent limits, runs as a hosted service on the configured `TORRENT_PORT`.
+  decoupled from its DB/pipeline: PEX/LSD plus DHT (`TORRENT_ENABLE_DHT`), protocol
+  encryption, fast-resume/metadata cache, per-torrent limits, runs as a hosted service on
+  the configured `TORRENT_PORT`. The engine itself exists only while a torrent is
+  registered, so an idle app costs nothing.
 - **Control API + SSE** (`src/TorrentEngine.Api/Api`, `.../Realtime`) — add/list/inspect/
   pause/resume/stop/remove downloads, and `GET /events` streaming progress + metadata/
   completed/errored transitions.

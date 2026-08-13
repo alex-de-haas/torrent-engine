@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using TorrentEngine.Api.Torrents;
 
 namespace TorrentEngine.Api.Tests;
@@ -142,4 +143,32 @@ public sealed class TorrentEngineSettingsTests
 
         Assert.Throws<ArgumentException>(() => settings.ResolveSaveDirectory("movies", "../../etc/passwd"));
     }
+
+    // ---- TORRENT_ENABLE_DHT ----
+
+    private static TorrentEngineSettings FromEnvironment(params (string Key, string Value)[] entries) =>
+        TorrentEngineSettings.FromConfiguration(
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(entries.Select(e => new KeyValuePair<string, string?>(e.Key, e.Value)))
+                .Build(),
+            contentRoot: Path.GetTempPath());
+
+    [Fact]
+    public void EnableDht_DefaultsToTrue_SoAnUpgradeChangesNothing() =>
+        Assert.True(FromEnvironment().EnableDht);
+
+    [Theory]
+    [InlineData("false", false)]
+    [InlineData("False", false)]
+    [InlineData("true", true)]
+    public void EnableDht_ReadsTheConfiguredValue(string configured, bool expected) =>
+        Assert.Equal(expected, FromEnvironment(("TORRENT_ENABLE_DHT", configured)).EnableDht);
+
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("0")]
+    [InlineData("")]
+    public void EnableDht_MalformedValue_FallsBackToTheDefault(string configured) =>
+        // A typo must leave peer discovery working rather than silently turning DHT off.
+        Assert.True(FromEnvironment(("TORRENT_ENABLE_DHT", configured)).EnableDht);
 }
