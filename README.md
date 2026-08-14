@@ -111,6 +111,12 @@ traffic egresses through the VPN — a cached outbound check over the tunnel (di
 watched defaults to `tun0`; override it with `VPN_INTERFACE` if the tunnel comes up under a different
 name. The same status is pushed on the SSE stream as a `vpn` event whenever it changes.
 
+`GET /dht` reports DHT health the same way, so an *enabled but not working* DHT is visible rather than
+silent: `enabled` (the `TORRENT_ENABLE_DHT` setting), `running` (enabled **and** an engine exists — the
+engine is recycled while no torrent is registered, so idle reports `false`), `state` (MonoTorrent's
+`NotReady` / `Initialising` / `Ready`) and `nodeCount`. Derive "not working" from `state == "NotReady"`,
+never from `state != "Ready"` — `Initialising` is a healthy start-up. Pushed as a `dht` SSE event.
+
 ## Consumer integration
 
 A Hosty app drives this engine by declaring it as a cross-app dependency and calling the

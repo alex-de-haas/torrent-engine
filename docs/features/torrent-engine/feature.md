@@ -1,7 +1,7 @@
 # Torrent Engine
 
 Created: 2026-07-03
-Updated: 2026-08-13
+Updated: 2026-08-14
 
 ## Description
 
@@ -94,6 +94,9 @@ carries the per-torrent settings serialized on the previous run, so `StartAsync`
 re-applies `AllowDht` to each one it restores — rebuilt from that manager's own
 settings, so per-download rate limits are left untouched.
 
+Whether DHT is actually working is reported separately by `GET /dht` and the `dht` SSE
+event — see [DHT status](../dht/feature.md).
+
 ## Lifecycle and operations
 
 `ITorrentEngine` (`Torrents/ITorrentEngine.cs`) is the full contract:
@@ -119,6 +122,8 @@ settings, so per-download rate limits are left untouched.
 - **`TorrentCount`** — how many torrents are registered, without building a snapshot
   per torrent. It is the emptiness check the background loops use to skip a tick
   that has nothing to act on (see [VPN isolation](../vpn-isolation/feature.md)).
+- **`GetDhtStatus()`** — current DHT health; answerable with no engine running (see
+  [DHT status](../dht/feature.md)).
 
 State is held in three concurrent dictionaries keyed by info hash (managers,
 completion-raised guard, and `addedAt`), all cleaned up together in `RemoveAsync`.
@@ -126,7 +131,7 @@ completion-raised guard, and `addedAt`), all cleaned up together in `RemoveAsync
 ## State transitions → events
 
 `MonoTorrentEngine` subscribes to each manager's `TorrentStateChanged` and raises
-three engine events the broadcaster forwards onto SSE:
+four engine events the broadcaster forwards onto SSE:
 
 - **`DownloadErrored`** — on transition to `TorrentState.Error`.
 - **`DownloadCompleted`** — MonoTorrent moves `Downloading → Seeding` the instant a
@@ -135,6 +140,10 @@ three engine events the broadcaster forwards onto SSE:
   info hash, whichever path reaches it.
 - **`MetadataReceived`** — raised immediately for a `.torrent`, or after
   `WaitForMetadataAsync` completes for a magnet.
+- **`DhtStatusChanged`** — MonoTorrent's own DHT state transitions, plus the engine
+  construction and teardown edges that start and stop DHT with it. Those two are
+  raised outside the lifecycle lock, so a subscriber cannot re-enter it while it is
+  held. See [DHT status](../dht/feature.md).
 
 ## Snapshot derivation
 

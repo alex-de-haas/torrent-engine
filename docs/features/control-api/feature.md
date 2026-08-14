@@ -1,7 +1,7 @@
 # Control API
 
 Created: 2026-07-03
-Updated: 2026-07-28
+Updated: 2026-08-14
 
 ## Description
 
@@ -36,8 +36,9 @@ reflection-based serialization at runtime.
 | `POST /downloads/{infoHash}/resume` | Resume a torrent | `204` | — |
 | `POST /downloads/{infoHash}/stop` | Stop a torrent | `204` | — |
 | `DELETE /downloads/{infoHash}?deleteFiles=` | Remove a torrent | `204` | — |
-| `GET /events` | SSE stream (all torrents + VPN) | `200` `text/event-stream` | — |
+| `GET /events` | SSE stream (all torrents + VPN + DHT) | `200` `text/event-stream` | — |
 | `GET /vpn` | Current VPN tunnel status | `200` `VpnStatus` | — |
+| `GET /dht` | Current DHT health | `200` `DhtStatus` | — |
 | `GET /healthz` | Liveness | `200` `{ "status": "ok" }` | — |
 
 `infoHash` is the torrent's V1-or-V2 info hash as lowercase hex. The pause/resume/
@@ -136,10 +137,12 @@ data: {"type":"progress","infoHash":"abc…","snapshot":{…},"vpn":null}
 | `completed` | A torrent finishes (transition to a complete/seeding state; raised once) | `snapshot` set |
 | `errored` | A torrent enters the error state | `snapshot` set |
 | `vpn` | VPN tunnel status changes | `infoHash` empty, `vpn` set (`VpnStatus`), `snapshot` null |
+| `dht` | DHT health changes — MonoTorrent state transitions plus the engine lifecycle edges that start and stop DHT | `infoHash` empty, `dht` set (`DhtStatus`), `snapshot` null |
 
-`TorrentEvent` is `{ type, infoHash, snapshot, vpn }`: `infoHash` is empty for
-engine-wide events such as `vpn`; `snapshot` is null for `vpn`; `vpn` is null for
-per-torrent events.
+`TorrentEvent` is `{ type, infoHash, snapshot, vpn, dht }`: `infoHash` is empty for
+engine-wide events such as `vpn` and `dht`; `snapshot` is null for both; and each
+status field is set only on its own event. The fields are additive — a consumer that
+does not know about `dht` ignores it.
 
 The stream is served from an in-memory fan-out hub (`Realtime/TorrentEventStream.cs`):
 each subscriber gets its own **bounded** channel (256 events, `DropOldest`), so one
@@ -151,8 +154,8 @@ With **no subscriber attached** the periodic tick skips building snapshots entir
 — publishing to an empty hub was already a no-op, so nothing observable changes; it
 only stops the engine from being polled 40 times a minute for frames nobody reads.
 There is no server→client backfill or replay: a client that connects mid-download
-gets the next `progress` tick, and should seed initial state from `GET /downloads`
-and `GET /vpn`.
+gets the next `progress` tick, and should seed initial state from `GET /downloads`,
+`GET /vpn` and `GET /dht`.
 
 An otherwise-idle stream emits an SSE comment (`: ping`) every ~20s so a stream that
 would send zero bytes isn't silently dropped by an intermediary proxy. Clients
