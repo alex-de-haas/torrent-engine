@@ -1,8 +1,7 @@
 # Consumer Integration
 
-Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-03
+Updated: 2026-08-14
 
 ## Description
 
@@ -62,6 +61,9 @@ guarantee the engine is present. A consumer should therefore degrade gracefully:
   (liveness) and `GET /vpn` (`connected`), and hold off adding downloads until the
   tunnel is up. Seed VPN state from `GET /vpn` on connect, then track `vpn` SSE
   events (see [VPN isolation](vpn-isolation/feature.md)).
+- Seed DHT health the same way from `GET /dht`, then track `dht` SSE events (see
+  [DHT status](dht/feature.md)). Both the endpoint and the event are additive, so a
+  consumer that ignores them is unaffected.
 
 ## Re-driving off remote events
 

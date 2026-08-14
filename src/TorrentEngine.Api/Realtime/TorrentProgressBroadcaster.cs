@@ -21,6 +21,7 @@ public sealed class TorrentProgressBroadcaster(
         engine.MetadataReceived += OnMetadataReceived;
         engine.DownloadCompleted += OnDownloadCompleted;
         engine.DownloadErrored += OnDownloadErrored;
+        engine.DhtStatusChanged += OnDhtStatusChanged;
         vpn.StatusChanged += OnVpnStatusChanged;
 
         try
@@ -40,6 +41,7 @@ public sealed class TorrentProgressBroadcaster(
             engine.MetadataReceived -= OnMetadataReceived;
             engine.DownloadCompleted -= OnDownloadCompleted;
             engine.DownloadErrored -= OnDownloadErrored;
+            engine.DhtStatusChanged -= OnDhtStatusChanged;
             vpn.StatusChanged -= OnVpnStatusChanged;
         }
     }
@@ -77,6 +79,9 @@ public sealed class TorrentProgressBroadcaster(
 
     private void OnVpnStatusChanged(object? sender, VpnStatus status) =>
         stream.Publish(new TorrentEvent("vpn", string.Empty, null, status));
+
+    private void OnDhtStatusChanged(object? sender, DhtStatus status) =>
+        stream.Publish(new TorrentEvent("dht", string.Empty, null, Dht: status));
 
     private void Publish(string type, string infoHash)
     {

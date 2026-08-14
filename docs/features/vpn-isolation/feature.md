@@ -166,7 +166,7 @@ flowchart LR
 
 A consumer seeds status on connect with `GET /vpn`, then receives `vpn` SSE events
 as it changes; it can also gate its own readiness on `connected` while the tunnel
-comes up (see [Consumer integration](../consumer-integration.md)).
+comes up (see [Consumer integration](../consumer-integration/feature.md)).
 
 ## Known limitations
 

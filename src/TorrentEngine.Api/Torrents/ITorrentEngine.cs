@@ -102,6 +102,10 @@ public interface ITorrentEngine
     /// (an empty list means the torrent exists but has no metadata yet).</summary>
     IReadOnlyList<TorrentFileInfo>? GetFiles(string infoHash);
 
+    /// <summary>Current DHT health. Always answerable — with no engine running it reports a
+    /// not-running DHT rather than throwing.</summary>
+    DhtStatus GetDhtStatus();
+
     /// <summary>Raised when a magnet's file list becomes available after metadata download.</summary>
     event EventHandler<string>? MetadataReceived;
 
@@ -110,4 +114,8 @@ public interface ITorrentEngine
 
     /// <summary>Raised when a torrent enters an error state.</summary>
     event EventHandler<string>? DownloadErrored;
+
+    /// <summary>Raised when DHT health changes — MonoTorrent's own state transitions, plus the engine
+    /// lifecycle edges that start and stop DHT along with it.</summary>
+    event EventHandler<DhtStatus>? DhtStatusChanged;
 }

@@ -20,6 +20,7 @@ namespace TorrentEngine.Api.Api;
 [JsonSerializable(typeof(TorrentFileInfo))]
 [JsonSerializable(typeof(IReadOnlyList<TorrentFileInfo>))]
 [JsonSerializable(typeof(VpnStatus))]
+[JsonSerializable(typeof(DhtStatus))]
 [JsonSerializable(typeof(TorrentEvent))]
 [JsonSerializable(typeof(ErrorResponse))]
 [JsonSerializable(typeof(HealthResponse))]

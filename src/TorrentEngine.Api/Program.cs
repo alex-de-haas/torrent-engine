@@ -55,6 +55,9 @@ app.MapGet("/healthz", () => Results.Ok(new HealthResponse("ok")));
 // Current VPN tunnel status (a consumer seeds this on connect, then receives `vpn` SSE events).
 app.MapGet("/vpn", (VpnStatusMonitor vpn) => Results.Ok(vpn.GetStatus()));
 
+// Current DHT health, mirroring /vpn: seeded on connect, then kept fresh by `dht` SSE events.
+app.MapGet("/dht", (ITorrentEngine engine) => Results.Ok(engine.GetDhtStatus()));
+
 app.MapTorrentEndpoints();
 
 app.Run();

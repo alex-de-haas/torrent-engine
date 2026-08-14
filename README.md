@@ -18,7 +18,7 @@ Full documentation lives in [`docs/`](docs/root.md) — start at
 feature docs ([control API](docs/features/control-api/feature.md),
 [VPN isolation](docs/features/vpn-isolation/feature.md),
 [downloads mounts](docs/features/downloads-mounts.md),
-[consumer integration](docs/features/consumer-integration.md), and more).
+[consumer integration](docs/features/consumer-integration/feature.md), and more).
 
 See the originating design note in media-server:
 `docs/ideas/torrent-engine-app.md`.
@@ -70,8 +70,9 @@ GET    /downloads/{infoHash}
 GET    /downloads/{infoHash}/files
 POST   /downloads/{infoHash}/pause|resume|stop
 DELETE /downloads/{infoHash}?deleteFiles=
-GET    /events               (SSE: progress, metadata-received, completed, errored, vpn)
+GET    /events               (SSE: progress, metadata-received, completed, errored, vpn, dht)
 GET    /vpn                  { connected, tunnelInterface, tunnelAddress, exitIp, exitCountry, checkedAt }
+GET    /dht                  { enabled, running, state, nodeCount }
 GET    /healthz
 ```
 
@@ -110,6 +111,12 @@ traffic egresses through the VPN — a cached outbound check over the tunnel (di
 `VPN_EXIT_IP_CHECK=false`, or point it elsewhere with `VPN_EXIT_IP_CHECK_URL`). The tunnel interface
 watched defaults to `tun0`; override it with `VPN_INTERFACE` if the tunnel comes up under a different
 name. The same status is pushed on the SSE stream as a `vpn` event whenever it changes.
+
+`GET /dht` reports DHT health the same way, so an *enabled but not working* DHT is visible rather than
+silent: `enabled` (the `TORRENT_ENABLE_DHT` setting), `running` (enabled **and** an engine exists — the
+engine is recycled while no torrent is registered, so idle reports `false`), `state` (MonoTorrent's
+`NotReady` / `Initialising` / `Ready`) and `nodeCount`. Derive "not working" from `state == "NotReady"`,
+never from `state != "Ready"` — `Initialising` is a healthy start-up. Pushed as a `dht` SSE event.
 
 ## Consumer integration
 

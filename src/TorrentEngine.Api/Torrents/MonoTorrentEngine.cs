@@ -53,6 +53,28 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     public event EventHandler<string>? MetadataReceived;
     public event EventHandler<string>? DownloadCompleted;
     public event EventHandler<string>? DownloadErrored;
+    public event EventHandler<DhtStatus>? DhtStatusChanged;
+
+    /// <summary>
+    /// Current DHT health. Takes no lifecycle lock — like the other read-only views it must stay cheap, and
+    /// MonoTorrent keeps these properties readable even on an engine being disposed underneath us.
+    /// <see cref="DhtStatus.Enabled"/> comes from configuration because a disabled DHT is a null object that
+    /// reports <c>NotReady</c>, indistinguishable from one that failed to start.
+    /// </summary>
+    public DhtStatus GetDhtStatus()
+    {
+        var engine = _engine;
+        var running = engine is not null && _settings.EnableDht;
+        return new DhtStatus(
+            _settings.EnableDht,
+            running,
+            running ? engine!.Dht.State.ToString() : null,
+            running ? engine!.Dht.NodeCount : 0);
+    }
+
+    private void OnDhtStateChanged(object? sender, EventArgs args) => RaiseDhtStatus();
+
+    private void RaiseDhtStatus() => DhtStatusChanged?.Invoke(this, GetDhtStatus());
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -85,6 +107,10 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
                 _settings.Port, _settings.EnablePortMapping, _settings.EnableDht);
             return;
         }
+
+        // Follow the restored engine's DHT so its state transitions reach the SSE stream, exactly as they do
+        // for an engine constructed later by an add.
+        restored.Dht.StateChanged += OnDhtStateChanged;
 
         var restoredCount = 0;
         foreach (var manager in restored.Torrents.ToList())
@@ -206,12 +232,17 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
     /// </summary>
     private async Task<ClientEngine?> AcquireEngineAsync(bool createIfMissing)
     {
+        ClientEngine? engine;
+        var constructed = false;
+
         await _lifecycle.WaitAsync();
         try
         {
             if (_engine is null && createIfMissing)
             {
                 _engine = new ClientEngine(BuildEngineSettings());
+                _engine.Dht.StateChanged += OnDhtStateChanged;
+                constructed = true;
                 _logger.LogInformation(
                     "Torrent engine constructed on port {Port} for the first registered torrent.", _settings.Port);
             }
@@ -221,51 +252,68 @@ public sealed class MonoTorrentEngine : ITorrentEngine, IHostedService, IDisposa
                 _engineUsers++;
             }
 
-            return _engine;
+            engine = _engine;
         }
         finally
         {
             _lifecycle.Release();
         }
+
+        if (constructed)
+        {
+            // DHT just went from not-running to running. Raised outside the lock so a handler can never
+            // re-enter the lifecycle while it is held.
+            RaiseDhtStatus();
+        }
+
+        return engine;
     }
 
     /// <summary>Ends a use taken by <see cref="AcquireEngineAsync"/>, disposing the engine once the last
     /// torrent is gone and no other operation still holds it.</summary>
     private async Task ReleaseEngineAsync()
     {
+        var tornDown = false;
+
         await _lifecycle.WaitAsync();
         try
         {
             _engineUsers--;
-            if (_engineUsers > 0 || !_managers.IsEmpty || _engine is null)
+            if (_engineUsers == 0 && _managers.IsEmpty && _engine is not null)
             {
-                return;
-            }
+                var engine = _engine;
+                try
+                {
+                    // Persist the now-empty roster before dropping the engine: StartAsync restores from this
+                    // file, so leaving the previous one behind would resurrect the just-removed torrents.
+                    await engine.SaveStateAsync(StateFilePath);
+                }
+                catch (Exception exception)
+                {
+                    // The write failed (a full or read-only data volume), and once the engine is gone the
+                    // shutdown path has nothing left to persist. A surviving state file still lists the
+                    // removed torrents, so delete it: with an empty roster, "restore nothing" is the correct
+                    // outcome and the only one that keeps deleted downloads deleted.
+                    _logger.LogWarning(exception, "Could not persist the empty roster while tearing down the idle engine; discarding the stale state file instead.");
+                    DeleteStateFile();
+                }
 
-            var engine = _engine;
-            try
-            {
-                // Persist the now-empty roster before dropping the engine: StartAsync restores from this file,
-                // so leaving the previous one behind would resurrect the torrents that were just removed.
-                await engine.SaveStateAsync(StateFilePath);
+                engine.Dht.StateChanged -= OnDhtStateChanged;
+                engine.Dispose();
+                _engine = null;
+                tornDown = true;
+                _logger.LogInformation("Last torrent removed; torrent engine disposed until the next add.");
             }
-            catch (Exception exception)
-            {
-                // The write failed (a full or read-only data volume), and once the engine is gone the shutdown
-                // path has nothing left to persist. A surviving state file still lists the removed torrents,
-                // so delete it: with an empty roster, "restore nothing" is the correct outcome and the only
-                // one that keeps deleted downloads deleted.
-                _logger.LogWarning(exception, "Could not persist the empty roster while tearing down the idle engine; discarding the stale state file instead.");
-                DeleteStateFile();
-            }
-
-            engine.Dispose();
-            _engine = null;
-            _logger.LogInformation("Last torrent removed; torrent engine disposed until the next add.");
         }
         finally
         {
             _lifecycle.Release();
+        }
+
+        if (tornDown)
+        {
+            // DHT stopped along with the engine; same out-of-lock reasoning as the construction edge.
+            RaiseDhtStatus();
         }
     }
 
