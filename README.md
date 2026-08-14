@@ -18,7 +18,7 @@ Full documentation lives in [`docs/`](docs/root.md) — start at
 feature docs ([control API](docs/features/control-api/feature.md),
 [VPN isolation](docs/features/vpn-isolation/feature.md),
 [downloads mounts](docs/features/downloads-mounts.md),
-[consumer integration](docs/features/consumer-integration.md), and more).
+[consumer integration](docs/features/consumer-integration/feature.md), and more).
 
 See the originating design note in media-server:
 `docs/ideas/torrent-engine-app.md`.
@@ -70,8 +70,9 @@ GET    /downloads/{infoHash}
 GET    /downloads/{infoHash}/files
 POST   /downloads/{infoHash}/pause|resume|stop
 DELETE /downloads/{infoHash}?deleteFiles=
-GET    /events               (SSE: progress, metadata-received, completed, errored, vpn)
+GET    /events               (SSE: progress, metadata-received, completed, errored, vpn, dht)
 GET    /vpn                  { connected, tunnelInterface, tunnelAddress, exitIp, exitCountry, checkedAt }
+GET    /dht                  { enabled, running, state, nodeCount }
 GET    /healthz
 ```
 

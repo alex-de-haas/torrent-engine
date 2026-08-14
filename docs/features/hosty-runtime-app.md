@@ -75,7 +75,7 @@ The app publishes one endpoint, `control`, over HTTP. A consumer declares this a
 as a cross-app dependency and is handed the resolved base URL as an environment
 variable (`HOSTY_DEPENDENCY_TORRENT_ENGINE_URL` for Media Server); it points its
 HTTP client there and never hard-codes an address. See
-[Consumer integration](consumer-integration.md) for the full wiring, including the
+[Consumer integration](consumer-integration/feature.md) for the full wiring, including the
 current non-public-endpoint caveat.
 
 ## Telemetry

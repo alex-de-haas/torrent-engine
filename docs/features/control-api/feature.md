@@ -13,7 +13,7 @@ never reached directly. Engine records (`TorrentDescriptor`, `TorrentSnapshot`,
 `TorrentFileInfo`) are returned on the wire as-is; there is no separate DTO layer.
 
 The API is stateless per request. It is unauthenticated (the endpoint is
-non-public; see [Consumer integration](../consumer-integration.md)); caller
+non-public; see [Consumer integration](../consumer-integration/feature.md)); caller
 authentication is deferred to the platform's cross-app auth mechanism — peer
 introspection of the app service token, proposed in the Hosty repo as
 `docs/ideas/cross-app-auth.md`. An interim `CONTROL_API_TOKEN` shared-secret check
