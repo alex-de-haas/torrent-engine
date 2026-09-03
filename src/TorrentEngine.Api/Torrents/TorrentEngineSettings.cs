@@ -53,6 +53,19 @@ public sealed class TorrentEngineSettings
     /// ipinfo.io) is preferred; a plain-text IP body is also accepted.</summary>
     public string VpnExitCheckUrl { get; init; } = "https://ipinfo.io/json";
 
+    /// <summary>Root of the operator's OpenVPN profiles folder — the <c>vpn</c> external mount, injected as
+    /// <c>HOSTY_MOUNT_VPN</c> (<c>label=path</c>). <c>null</c> when no mount is injected (a run outside Hosty),
+    /// in which case there are no profiles to list or select.</summary>
+    public string? VpnProfilesDirectory { get; init; }
+
+    /// <summary>Directory the entrypoint's supervisor publishes its <c>status</c> file in (<c>VPN_STATE_DIR</c>,
+    /// default <c>/run/vpn</c>). Overridable so tests point it at a temp dir.</summary>
+    public string VpnStateDir { get; init; } = "/run/vpn";
+
+    /// <summary>File the API writes the operator's profile selection to and the supervisor watches. Lives under
+    /// the app data dir so the choice survives a restart (and travels with a backup).</summary>
+    public string VpnSelectionFile => Path.Combine(AppDataDir, "vpn", "active-profile");
+
     public static TorrentEngineSettings FromConfiguration(IConfiguration configuration, string contentRoot)
     {
         string? Read(string key) => configuration[key] is { Length: > 0 } value ? value.Trim() : null;
@@ -76,7 +89,33 @@ public sealed class TorrentEngineSettings
             VpnInterface = Read("VPN_INTERFACE") ?? "tun0",
             VpnExitCheckEnabled = ReadBool("VPN_EXIT_IP_CHECK", true),
             VpnExitCheckUrl = Read("VPN_EXIT_IP_CHECK_URL") ?? "https://ipinfo.io/json",
+            VpnProfilesDirectory = ParseFirstMountPath(Read("HOSTY_MOUNT_VPN")),
+            VpnStateDir = Read("VPN_STATE_DIR") ?? "/run/vpn",
         };
+    }
+
+    /// <summary>The path of the first binding in a <c>HOSTY_MOUNT_*</c> value (<c>label=path[,label=path…]</c>),
+    /// for a slot that takes a single host path such as the <c>vpn</c> profiles folder. Splits each entry on the
+    /// <b>first</b> <c>'='</c> only (a host path may contain one) and tolerates a bare path from an older Core.
+    /// <c>null</c> when nothing is injected.</summary>
+    internal static string? ParseFirstMountPath(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        foreach (var entry in raw.Split([',', '\n', '\r', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separator = entry.IndexOf('=');
+            var path = (separator >= 0 ? entry[(separator + 1)..] : entry).Trim();
+            if (path.Length > 0)
+            {
+                return Path.GetFullPath(path);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>Parses <c>HOSTY_MOUNT_DOWNLOADS</c> — a comma-joined list of <c>label=path</c> entries (Core

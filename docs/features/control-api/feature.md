@@ -1,13 +1,14 @@
 # Control API
 
 Created: 2026-07-03
-Updated: 2026-08-14
+Updated: 2026-09-03
 
 ## Description
 
 The control API is the consumer-facing surface of the engine: an ASP.NET Core
-Minimal API (`src/TorrentEngine.Api/Api/TorrentEndpoints.cs`, plus `/healthz` and
-`/vpn` in `Program.cs`) over HTTP, with a Server-Sent Events stream for live
+Minimal API (`src/TorrentEngine.Api/Api/TorrentEndpoints.cs` for downloads and events,
+`Api/VpnEndpoints.cs` for the VPN surface, plus `/healthz` and `/dht` in
+`Program.cs`) over HTTP, with a Server-Sent Events stream for live
 progress and state transitions. It is the only way in — the MonoTorrent engine is
 never reached directly. Engine records (`TorrentDescriptor`, `TorrentSnapshot`,
 `TorrentFileInfo`) are returned on the wire as-is; there is no separate DTO layer.
@@ -37,7 +38,9 @@ reflection-based serialization at runtime.
 | `POST /downloads/{infoHash}/stop` | Stop a torrent | `204` | — |
 | `DELETE /downloads/{infoHash}?deleteFiles=` | Remove a torrent | `204` | — |
 | `GET /events` | SSE stream (all torrents + VPN + DHT) | `200` `text/event-stream` | — |
-| `GET /vpn` | Current VPN tunnel status | `200` `VpnStatus` | — |
+| `GET /vpn` | Current VPN tunnel status + active profile | `200` `VpnStatus` | — |
+| `GET /vpn/profiles` | The operator's OpenVPN profiles and the active one | `200` `VpnProfilesResponse` | — |
+| `PUT /vpn/profile` | Switch to another profile (performed in the background) | `202` `VpnStatus` | `400` malformed id, `404` unknown id / no profiles folder |
 | `GET /dht` | Current DHT health | `200` `DhtStatus` | — |
 | `GET /healthz` | Liveness | `200` `{ "status": "ok" }` | — |
 
@@ -119,6 +122,39 @@ peers discovered but few connected points at NAT / port-forwarding behind the VP
 rather than a discovery (tracker/DHT) problem. See
 [Torrent engine](../torrent-engine/feature.md) for how these are derived.
 
+## VPN status and profiles
+
+`VpnStatus` (`GET /vpn`, the `vpn` SSE event) is the tunnel as the engine sees it
+plus the entrypoint supervisor's view of the OpenVPN profile — see
+[VPN isolation](../vpn-isolation/feature.md) and [VPN profiles](../vpn-profiles/feature.md):
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `connected` | bool | The tunnel interface exists with an IPv4 address — the primary signal. |
+| `tunnelInterface` | string? | Interface name (`tun0`). |
+| `tunnelAddress` | string? | Its IPv4 address. |
+| `exitIp` / `exitCountry` | string? | Best-effort proof of egress from the cached exit-IP check; null when disabled, pending, or unreachable. |
+| `checkedAt` | DateTimeOffset | When the monitor last polled (not when the exit IP was last verified). |
+| `profile` | string? | The profile the supervisor runs (its file name without extension); null before it started one, or outside the container. |
+| `pendingProfile` | string? | The profile a switch is moving to, while it is in flight. |
+| `lastError` | string? | Why the last start or switch failed (an unknown id, an OpenVPN options error, `AUTH_FAILED`, …); cleared when the client is back up after an exit. |
+
+The last three are additive; a consumer that predates them keeps working.
+
+`GET /vpn/profiles` returns `VpnProfilesResponse`, `{ "active": "<id>|null",
+"profiles": [ { "id", "remote" } ] }`: `active` is `profile` above, `profiles` is the
+operator's folder listed live and sorted by id, and `remote` is the host[:port] from a
+profile's first `remote` line — enough to label a picker entry, never the file
+contents. Empty with no folder configured.
+
+`PUT /vpn/profile` takes `{ "id": "<profile id>" }` (trimmed). It validates — `400`
+for anything that is not a bare file name, `404` for an unknown id (the body lists the
+known ones) or when no profiles folder is configured — then **records the wish** in
+the app-data selection file and answers `202` with the *current* status. The switch
+itself is the supervisor's: `pendingProfile` appears on the next `vpn` event, the
+tunnel goes down and comes back under the new `profile`, and a failure lands in
+`lastError`. Same trust boundary as the rest of the API.
+
 ## SSE event stream (`GET /events`)
 
 `GET /events` returns `text/event-stream` (with `Cache-Control: no-cache` and
@@ -136,7 +172,7 @@ data: {"type":"progress","infoHash":"abc…","snapshot":{…},"vpn":null}
 | `metadata-received` | A magnet's file list becomes available | `snapshot` set |
 | `completed` | A torrent finishes (transition to a complete/seeding state; raised once) | `snapshot` set |
 | `errored` | A torrent enters the error state | `snapshot` set |
-| `vpn` | VPN tunnel status changes | `infoHash` empty, `vpn` set (`VpnStatus`), `snapshot` null |
+| `vpn` | VPN tunnel status changes — connectivity, tunnel address, exit IP, or the profile / pending profile / last error | `infoHash` empty, `vpn` set (`VpnStatus`), `snapshot` null |
 | `dht` | DHT health changes — MonoTorrent state transitions plus the engine lifecycle edges that start and stop DHT | `infoHash` empty, `dht` set (`DhtStatus`), `snapshot` null |
 
 `TorrentEvent` is `{ type, infoHash, snapshot, vpn, dht }`: `infoHash` is empty for
@@ -163,11 +199,12 @@ ignore comment lines.
 
 ## Error envelope
 
-`400`/`409` carry an `ErrorResponse` body,
+`400`/`409`, and the `404`s of `PUT /vpn/profile`, carry an `ErrorResponse` body,
 `{ "error": "<message>" }`. The message is human-readable and safe to surface to an
-operator (e.g. an unknown `mountLabel` lists the configured labels). A `404` for an
-unknown info hash (`GET /downloads/{infoHash}` / `…/files`) has an **empty** body —
-the hash in the path is all the context there is. `/healthz` returns
+operator (e.g. an unknown `mountLabel` lists the configured labels; an unknown
+profile id lists the known ones). A `404` for an unknown info hash
+(`GET /downloads/{infoHash}` / `…/files`) has an **empty** body — the hash in the
+path is all the context there is. `/healthz` returns
 `{ "status": "ok" }`.
 
 ## Testing Expectations
@@ -185,3 +222,6 @@ an in-memory `TestServer`. Required coverage:
   type.
 - The progress tick: no subscribers → the engine is not read at all; one subscriber
   → one `progress` frame per registered torrent.
+- `GET /vpn/profiles` shape; `PUT /vpn/profile` → `400` / `404` / `202` and the
+  selection file written; `GET /vpn` carrying `profile` / `pendingProfile` /
+  `lastError` (see [VPN profiles](../vpn-profiles/feature.md#testing-expectations)).

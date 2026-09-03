@@ -29,10 +29,12 @@ once:
 
 ## Configuration
 
-`OPENVPN_CONFIG` is **required** — traffic is not routed until the tunnel is up. It
-accepts the raw `.ovpn` contents or a base64 encoding of them; prefer base64 for a
-single-line secret field (`base64 -w0 client.ovpn`, or `base64 -i client.ovpn | tr -d
-'\n'` on macOS). Optional username/password round out the settings.
+The VPN comes from a folder of your own OpenVPN profiles, bound read-only into the
+app's `vpn` mount: one `.ovpn` per profile, a `<id>.auth` (username, password) beside a
+profile that needs one, and any certificates a profile references. Several profiles can
+live there; the active one is chosen at start (`VPN_PROFILE`, else the only or first
+one) and can be switched at runtime through the control API. Traffic is not routed
+until the tunnel is up.
 
 ## Using it
 

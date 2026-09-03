@@ -1,8 +1,7 @@
 # Hosty Runtime App
 
-Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-03
+Updated: 2026-09-03
 
 ## Description
 
@@ -13,7 +12,7 @@ update, backup/restore, logs — and injects the environment the app reads (data
 mounts, ports, and, when enabled, telemetry). The app never hard-codes ports,
 origins, or paths. This doc is the reference for the manifest and the platform
 contract; the environment variables it produces are enumerated in
-[Configuration](configuration/feature.md).
+[Configuration](../configuration/feature.md).
 
 ## Manifest anatomy
 
@@ -28,7 +27,8 @@ A single `engine` service with one `docker` runtime profile
 | `…docker.ports` | `control` → container port `8080`, `http`. |
 | `endpoints` | `control` → the `engine` service's `control` port; the consumer-facing HTTP surface. |
 | `data` | Enabled; the `engine`'s `/app/data` is the backed-up app data dir, exposed as `HOSTY_APP_DATA_DIR`. |
-| `externalMounts.downloads` | `host-path`, `multiple`, `rw`, `required` — one host path per catalog filesystem (see [Downloads mounts](downloads-mounts.md)). |
+| `externalMounts.downloads` | `host-path`, `multiple`, `rw`, `required` — one host path per catalog filesystem (see [Downloads mounts](../downloads-mounts.md)). |
+| `externalMounts.vpn` | `host-path`, single, `ro`, `required`, bound into `engine` — the operator's folder of OpenVPN profiles (see [VPN profiles](../vpn-profiles/feature.md)). |
 | `settings` | VPN + torrent knobs (see below). |
 | `telemetry` | `{ enabled: true, sampleRatio: 0.1 }` — opt-in observability (see [Telemetry](#telemetry)). |
 | `capabilities` | `update`, `restart`, `stop`, `remove`, `backup`, `restore`, `logs`. |
@@ -49,12 +49,10 @@ environment at startup:
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `OPENVPN_CONFIG` | string (secret) | — (**required**) | The `.ovpn` contents, raw or base64. |
-| `OPENVPN_USERNAME` | string (secret) | — | Optional VPN auth username. |
-| `OPENVPN_PASSWORD` | string (secret) | — | Optional VPN auth password. |
 | `TORRENT_PORT` | number | `6881` | Raw L4 listen port (TCP + UDP). |
 | `TORRENT_MAX_DOWNLOAD_SPEED` | number | `0` | Bytes/sec, `0` = unlimited. |
 | `TORRENT_MAX_UPLOAD_SPEED` | number | `0` | Bytes/sec, `0` = unlimited. |
+| `VPN_PROFILE` | string | — | Profile to start with when none was selected through the API (the only / first one otherwise). |
 | `VPN_INTERFACE` | string | `tun0` | Tunnel interface the killswitch/monitor watch. |
 | `VPN_DNS` | string | `1.1.1.1` | Tunnel-reachable DNS resolver. |
 | `VPN_EXIT_IP_CHECK` | boolean | `true` | Best-effort exit-IP verification over the tunnel. |
@@ -64,10 +62,11 @@ environment at startup:
 
 `HOSTY_APP_DATA_DIR` (`/app/data` in the container) holds MonoTorrent's fast-resume
 state and magnet-metadata cache under a `torrent-engine/` subdirectory, so
-in-flight downloads and fetched metadata survive a restart. It is in the manifest's
+in-flight downloads and fetched metadata survive a restart, and the VPN profile
+selection under `vpn/active-profile`, so a switch made through the API does too. It is in the manifest's
 `data` targets, so Core's `backup`/`restore` cover it. Download **payload** does not
 live here — it lives on the `downloads` mounts (see
-[Downloads mounts](downloads-mounts.md)).
+[Downloads mounts](../downloads-mounts.md)).
 
 ## Endpoints and discovery
 
@@ -75,7 +74,7 @@ The app publishes one endpoint, `control`, over HTTP. A consumer declares this a
 as a cross-app dependency and is handed the resolved base URL as an environment
 variable (`HOSTY_DEPENDENCY_TORRENT_ENGINE_URL` for Media Server); it points its
 HTTP client there and never hard-codes an address. See
-[Consumer integration](consumer-integration/feature.md) for the full wiring, including the
+[Consumer integration](../consumer-integration/feature.md) for the full wiring, including the
 current non-public-endpoint caveat.
 
 ## Telemetry
@@ -97,11 +96,11 @@ Only the `docker` profile is defined, and it is the default — the VPN, killswi
 and elevated privileges only make sense inside the container. The app can still be
 run directly with `dotnet run` for local API/engine work; with no VPN and no mount
 injected it falls back to a single unlabeled downloads root under the content root
-and reports the tunnel as down (see [Build and deployment](build-and-deployment.md)).
+and reports the tunnel as down (see [Build and deployment](../build-and-deployment/feature.md)).
 
 ## Testing Expectations
 
 Manifest/platform integration (capabilities, devices, mount injection, endpoint
 discovery, backups) is validated through Core-managed runtime, not unit tests. The
 settings-resolution layer that reads this environment is unit-tested — see
-[Configuration](configuration/feature.md) and [Downloads mounts](downloads-mounts.md).
+[Configuration](../configuration/feature.md) and [Downloads mounts](../downloads-mounts.md).

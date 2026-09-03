@@ -1,21 +1,23 @@
 # VPN Isolation and Killswitch
 
 Created: 2026-07-03
-Updated: 2026-07-28
+Updated: 2026-09-03
 
 ## Description
 
 VPN isolation is the reason this engine is a separate app. Peer traffic must egress
 **only** through an OpenVPN tunnel, while the control API stays reachable on the
 docker bridge for the consumer. Two layers cooperate: a container entrypoint
-(`docker/entrypoint.sh`) that brings up the tunnel behind a default-deny iptables
-**killswitch** before the API starts, and two in-process background services
+(`docker/entrypoint.sh`) that brings up the tunnel — from one of the operator's
+OpenVPN profiles, see [VPN profiles](../vpn-profiles/feature.md) — behind a
+default-deny iptables **killswitch** before the API starts, and two in-process
+background services
 (`Vpn/VpnStatusMonitor.cs`, `Vpn/VpnDownloadGate.cs`) that report tunnel status and
 pause/resume downloads around outages.
 
 The operator supplies their own VPN — the engine bundles none. Running OpenVPN and
 rewriting iptables inside the container requires `NET_ADMIN` and `/dev/net/tun`,
-granted through the [manifest](../hosty-runtime-app.md).
+granted through the [manifest](../hosty-runtime-app/feature.md).
 
 > **Not yet leak-tested.** The killswitch rules are a first implementation, verified
 > by reading them rather than by observing traffic on a tunnel drop. Treat them as
@@ -25,30 +27,35 @@ granted through the [manifest](../hosty-runtime-app.md).
 
 The entrypoint runs as PID 1 up to the final `exec`, in this order:
 
-1. **Materialize the `.ovpn`.** `OPENVPN_CONFIG` is a Hosty secret setting. A
-   single-line secret field mangles the newlines OpenVPN needs, so the config may be
-   the **raw** `.ovpn` **or a base64 encoding** of it. The script tries a
-   whitespace-stripped base64 decode and accepts it only if the result looks like an
-   OpenVPN config (`client` / `remote` / `proto` / `dev` line); otherwise it treats
-   the value as raw. CRLF is stripped so `remote` parsing doesn't carry a trailing
-   `\r`. If `OPENVPN_USERNAME` is set, an `--auth-user-pass` file is written.
+1. **Resolve the active profile.** The `.ovpn` files are the operator's own, in
+   the read-only `vpn` mount (`HOSTY_MOUNT_VPN`). The entrypoint lists them, picks
+   the active one (persisted selection → `VPN_PROFILE` → the only one → the first by
+   name) and publishes its view in the supervisor status file. Folder layout, ids,
+   credentials and the precedence rule: [VPN profiles](../vpn-profiles/feature.md).
 2. **Apply the killswitch** (see below) — **before** OpenVPN starts, so there is no
-   window where traffic can leak. This also resolves the VPN `remote`(s) and the
-   telemetry collector once, **pinning** each into `/etc/hosts` while docker's DNS is
-   still reachable, so later lookups survive the resolv.conf rewrite below.
-3. **Start OpenVPN** as a daemon (`--writepid`, `--log /var/log/openvpn.log`); its
-   log is also mirrored to stdout so it shows up in `docker logs`.
-4. **Wait for the tunnel** — up to 60s for `tun0` to appear; logs and continues (the
-   killswitch keeps traffic contained even if it doesn't come up in time).
+   window where traffic can leak. This also resolves the `remote`(s) of **every**
+   profile and the telemetry collector once, **pinning** each into `/etc/hosts` while
+   docker's DNS is still reachable, so later lookups — and a later profile switch —
+   survive the resolv.conf rewrite below.
+3. **Start OpenVPN** for the active profile, in place from the folder (`--cd`, plus
+   `--auth-user-pass` from its `<id>.auth` when present) as a daemon (`--writepid`,
+   `--log /var/log/openvpn.log`); its log is also mirrored to stdout so it shows up
+   in `docker logs`. With no profile to start, nothing does: the killswitch stays
+   up and the API reports why.
+4. **Wait for the tunnel** — up to 60s for the tunnel interface (`VPN_INTERFACE`,
+   default `tun0`) to appear; logs and continues (the killswitch keeps traffic
+   contained even if it doesn't come up in time).
 5. **Route DNS through the tunnel.** Once `redirect-gateway` sends traffic over
    `tun0`, the host/docker resolver becomes unreachable and using it would leak
    lookups outside the VPN. `resolv.conf` is rewritten to a tunnel-reachable
    resolver (`VPN_DNS`, default `1.1.1.1`). The `remote`/collector hosts pinned in
    step 2 still resolve because they now come from `/etc/hosts`, not DNS.
-6. **Start a watchdog** — a background loop that every 10s checks whether the
-   `openvpn` process is alive (by name, robust to a stale PID file) and restarts it
-   if it died, so the tunnel — the killswitch's only egress path — comes back
-   without a container restart. OpenVPN's own keepalive/ping-restart handles
+6. **Start the supervisor** — one background loop that owns the OpenVPN process.
+   Every 2s it re-reads the profile selection file and performs a switch when it
+   names another profile ([VPN profiles](../vpn-profiles/feature.md#switching-at-runtime));
+   every 10s it restarts the `openvpn` process if it died (checked by name, robust
+   to a stale PID file), so the tunnel — the killswitch's only egress path — comes
+   back without a container restart. OpenVPN's own keepalive/ping-restart handles
    ordinary network drops.
 7. **`exec` the API** so `TorrentEngine.Api` becomes PID 1 and receives signals for
    a clean shutdown.
@@ -65,12 +72,15 @@ The entrypoint runs as PID 1 up to the final `exec`, in this order:
   in-container control port only. The port is read from `ASPNETCORE_URLS` (the
   container's own listen port), **not** the host-published port, so the killswitch
   opens the port the API actually binds.
-- **Tunnel** — everything in/out over `tun0`.
-- **VPN endpoint** — the `remote <host> [port] [proto]` lines from the `.ovpn` are
-  parsed (default `udp` / `1194`; a `proto` of `tcp-client`/`udp4`/… is mapped to the
-  `tcp`/`udp` iptables understands), the hostnames resolved and pinned, and outbound
-  to those IP/port/proto allowed on the bridge — just enough for OpenVPN to establish
-  the tunnel.
+- **Tunnel** — everything in/out over the tunnel interface (`VPN_INTERFACE`, default `tun0`).
+- **VPN endpoint** — the `remote <host> [port] [proto]` lines of the **active**
+  profile are parsed (CR-stripped; default `udp` / `1194`; a `proto` of
+  `tcp-client`/`udp4`/… is mapped to the `tcp`/`udp` iptables understands), the
+  hostnames resolved (from `/etc/hosts`, where every profile's remotes were pinned
+  at boot) and outbound to those IP/port/proto allowed on the bridge — just enough
+  for OpenVPN to establish the tunnel. Only the active profile's endpoints are open;
+  a profile switch re-applies the whole rule set keyed to the new one, and because
+  the default `DROP` policies persist across the flush there is no leak window.
 - **Telemetry collector** — when `OTEL_EXPORTER_OTLP_ENDPOINT` is injected, its host
   (typically `host.docker.internal`, reachable only on the bridge) is pinned, given a
   `/32` route so it keeps using the bridge after `redirect-gateway`, and allowed
@@ -103,25 +113,34 @@ should be validated against a real collector before relying on it.
 
 A `BackgroundService` that tracks the tunnel and exposes it to `GET /vpn` and the
 SSE `vpn` event. It reports a `VpnStatus`
-(`{ connected, tunnelInterface, tunnelAddress, exitIp, exitCountry, checkedAt }`):
+(`{ connected, tunnelInterface, tunnelAddress, exitIp, exitCountry, checkedAt, profile, pendingProfile, lastError }`
+— the last three are the entrypoint supervisor's view, read from its status file on
+every poll and every `GET /vpn`; see [VPN profiles](../vpn-profiles/feature.md)):
 
 - **Tunnel read (cheap, local).** `connected` means the interface named by
   `VPN_INTERFACE` (default `tun0`) exists with an assigned IPv4 address — tun
   devices often report `OperationalStatus.Unknown`, so an assigned address is the
-  reliable "up" signal. Polled every **15s**.
+  reliable "up" signal. Polled every **5s** together with the supervisor's status
+  file — short so a profile switch (`pendingProfile`, then the new `profile`) is
+  pushed while it happens.
 - **Exit-IP check (best-effort, over the tunnel).** An outbound request to
   `VPN_EXIT_IP_CHECK_URL` (default `https://ipinfo.io/json`) proves traffic actually
-  egresses the VPN and reports `exitIp` / `exitCountry`. Refreshed on connect and
-  then at most every **5 minutes**; a failed check still stamps its timestamp so a
+  egresses the VPN and reports `exitIp` / `exitCountry`. Refreshed on connect,
+  whenever the tunnel is a different one (a new tunnel address, or the supervisor
+  running another profile — a switch can complete between two polls), and then at
+  most every **5 minutes**; a failed check still stamps its timestamp so a
   failure backs off for the full interval instead of hammering the service. It
   parses ipinfo/ip-api JSON shapes or a bare-IP body, with an 8s timeout. Disable it
   with `VPN_EXIT_IP_CHECK=false`, or point it elsewhere with `VPN_EXIT_IP_CHECK_URL`.
-- **`GetStatus()`** re-reads the tunnel live and combines it with the **cached**
-  exit IP, reporting the last poll's `checkedAt` (so the timestamp never implies the
-  exit IP was just re-verified). This is what `GET /vpn` serves without waiting on
-  the loop.
-- **`StatusChanged`** fires only when connectivity, the tunnel address, or the exit
-  IP/country meaningfully changes — that is what becomes an SSE `vpn` event.
+- **`GetStatus()`** re-reads the tunnel and the supervisor status live and combines
+  them with the **cached** exit IP, reporting the last poll's `checkedAt` (so the
+  timestamp never implies the exit IP was just re-verified). The cached exit is used
+  only while it still describes the current tunnel — same address, same profile —
+  and is reported as unknown otherwise. This is what `GET /vpn` serves without
+  waiting on the loop.
+- **`StatusChanged`** fires only when connectivity, the tunnel address, the exit
+  IP/country, or the supervisor's profile / pending profile / last error meaningfully
+  changes — that is what becomes an SSE `vpn` event.
 
 Because the exit-IP check goes out over the tunnel, it is naturally blocked by the
 killswitch when the tunnel is down; a failure there is expected and non-fatal since
@@ -156,7 +175,7 @@ spinning on connections that cannot leave.
 
 ```mermaid
 flowchart LR
-  KS["entrypoint.sh<br/>OpenVPN + killswitch"] -->|"tun0 up/down"| MON["VpnStatusMonitor<br/>poll 15s · exit-IP 5m"]
+  KS["entrypoint.sh<br/>OpenVPN + killswitch"] -->|"tun0 up/down"| MON["VpnStatusMonitor<br/>poll 5s · exit-IP 5m"]
   MON -->|StatusChanged| GATE["VpnDownloadGate<br/>reconcile 5s"]
   MON -->|StatusChanged| BCAST["TorrentProgressBroadcaster"]
   GATE -->|"pause / resume"| ENG["MonoTorrentEngine"]
@@ -177,9 +196,11 @@ What the current rules do and do not cover:
 - **`remote` address family.** The VPN endpoint allowance is written for an **IPv4**
   `remote`. A v6-only `remote` is unreachable under the IPv6 default-deny and needs
   an explicit rule.
-- **Reconnect DNS.** The `remote` is pinned into `/etc/hosts` at boot, so an OpenVPN
-  reconnect resolves it even with the tunnel (and thus its DNS) down. A `remote`
-  whose IP changes while the tunnel is down needs a container restart.
+- **Reconnect DNS.** Every profile's `remote` is pinned into `/etc/hosts` at boot,
+  so an OpenVPN reconnect or a profile switch resolves it even with the tunnel (and
+  thus its DNS) down. A `remote` whose IP changes while the tunnel is down — or a
+  profile added to the folder after boot and switched to while it is down — needs a
+  container restart.
 - **Collector reachability.** The telemetry allowance depends on the collector being
   reachable via the original bridge gateway; where it is not, exports are dropped by
   the killswitch rather than falling back.
