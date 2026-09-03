@@ -29,6 +29,10 @@ builder.Services.AddSingleton<MonoTorrentEngine>();
 builder.Services.AddSingleton<ITorrentEngine>(sp => sp.GetRequiredService<MonoTorrentEngine>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonoTorrentEngine>());
 
+// The operator's OpenVPN profiles (the `vpn` external mount) and the two files the API exchanges with the
+// entrypoint's supervisor: the selection it writes, the status it reads. See Vpn/VpnProfileCatalog.cs.
+builder.Services.AddSingleton<IVpnProfileCatalog, VpnProfileCatalog>();
+
 // VPN tunnel status: a singleton (resolved by the /vpn endpoint and the broadcaster) that is also a
 // hosted service running the poll loop. The exit-IP check uses the default HttpClient factory.
 builder.Services.AddHttpClient();
@@ -52,11 +56,11 @@ var app = builder.Build();
 // Liveness — also used by a consumer to gate readiness while the VPN tunnel comes up.
 app.MapGet("/healthz", () => Results.Ok(new HealthResponse("ok")));
 
-// Current VPN tunnel status (a consumer seeds this on connect, then receives `vpn` SSE events).
-app.MapGet("/vpn", (VpnStatusMonitor vpn) => Results.Ok(vpn.GetStatus()));
-
 // Current DHT health, mirroring /vpn: seeded on connect, then kept fresh by `dht` SSE events.
 app.MapGet("/dht", (ITorrentEngine engine) => Results.Ok(engine.GetDhtStatus()));
+
+// /vpn (status), /vpn/profiles and PUT /vpn/profile. See Api/VpnEndpoints.cs.
+app.MapVpnEndpoints();
 
 app.MapTorrentEndpoints();
 

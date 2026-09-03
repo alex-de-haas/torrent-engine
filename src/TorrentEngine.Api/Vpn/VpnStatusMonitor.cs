@@ -9,12 +9,14 @@ namespace TorrentEngine.Api.Vpn;
 /// <summary>
 /// Tracks the VPN tunnel the engine runs behind. The tunnel interface is read locally and cheaply
 /// (no network call); the public exit IP is a best-effort outbound check over the tunnel, refreshed
-/// on a long interval and cached. Runs as a background loop and raises <see cref="StatusChanged"/>
-/// whenever connectivity, the tunnel address, or the exit IP changes so the SSE stream can push it.
+/// on a long interval and cached; the supervisor's profile/pending/error trio is read from its status
+/// file. Runs as a background loop and raises <see cref="StatusChanged"/> whenever connectivity, the
+/// tunnel address, the exit IP, or the supervisor's view changes so the SSE stream can push it.
 /// </summary>
 public sealed class VpnStatusMonitor(
     TorrentEngineSettings settings,
     IHttpClientFactory httpClientFactory,
+    IVpnProfileCatalog catalog,
     ILogger<VpnStatusMonitor> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
@@ -33,22 +35,26 @@ public sealed class VpnStatusMonitor(
     public event EventHandler<VpnStatus>? StatusChanged;
 
     /// <summary>
-    /// Live status: re-reads the tunnel interface (cheap) and combines it with the cached exit IP.
-    /// Suitable for a <c>GET /vpn</c> seed without waiting on the poll loop.
+    /// Live status: re-reads the tunnel interface and the supervisor status file (both cheap) and combines
+    /// them with the cached exit IP. Suitable for a <c>GET /vpn</c> seed without waiting on the poll loop.
     /// </summary>
     public VpnStatus GetStatus()
     {
         var cached = _current;
         var (connected, iface, address) = ReadTunnel();
-        // Only the tunnel read is live here; the exit IP is reused from the last poll, so report that
-        // poll's timestamp rather than now — CheckedAt must not imply the exit IP was just re-verified.
+        var supervisor = catalog.ReadSupervisorStatus();
+        // Only the tunnel and supervisor reads are live here; the exit IP is reused from the last poll, so
+        // report that poll's timestamp rather than now — CheckedAt must not imply the exit IP was just re-verified.
         return new VpnStatus(
             connected,
             iface,
             address,
             connected ? cached?.ExitIp : null,
             connected ? cached?.ExitCountry : null,
-            cached?.CheckedAt ?? DateTimeOffset.UtcNow);
+            cached?.CheckedAt ?? DateTimeOffset.UtcNow,
+            supervisor.Profile,
+            supervisor.PendingProfile,
+            supervisor.LastError);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -92,7 +98,10 @@ public sealed class VpnStatusMonitor(
                 }
             }
 
-            var status = new VpnStatus(connected, iface, address, exitIp, exitCountry, DateTimeOffset.UtcNow);
+            var supervisor = catalog.ReadSupervisorStatus();
+            var status = new VpnStatus(
+                connected, iface, address, exitIp, exitCountry, DateTimeOffset.UtcNow,
+                supervisor.Profile, supervisor.PendingProfile, supervisor.LastError);
             _current = status;
 
             if (HasChanged(previous, status))
@@ -190,11 +199,17 @@ public sealed class VpnStatusMonitor(
             ? value.GetString()
             : null;
 
-    private static bool HasChanged(VpnStatus? previous, VpnStatus current) =>
+    /// <summary>What counts as a change worth an SSE <c>vpn</c> event: connectivity, the tunnel identity, the
+    /// exit IP/country, or the supervisor's profile/pending/error trio — never <see cref="VpnStatus.CheckedAt"/>
+    /// alone. Internal for the tests.</summary>
+    internal static bool HasChanged(VpnStatus? previous, VpnStatus current) =>
         previous is null
         || previous.Connected != current.Connected
         || previous.TunnelInterface != current.TunnelInterface
         || previous.TunnelAddress != current.TunnelAddress
         || previous.ExitIp != current.ExitIp
-        || previous.ExitCountry != current.ExitCountry;
+        || previous.ExitCountry != current.ExitCountry
+        || previous.Profile != current.Profile
+        || previous.PendingProfile != current.PendingProfile
+        || previous.LastError != current.LastError;
 }

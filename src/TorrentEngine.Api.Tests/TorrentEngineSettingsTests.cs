@@ -171,4 +171,45 @@ public sealed class TorrentEngineSettingsTests
     public void EnableDht_MalformedValue_FallsBackToTheDefault(string configured) =>
         // A typo must leave peer discovery working rather than silently turning DHT off.
         Assert.True(FromEnvironment(("TORRENT_ENABLE_DHT", configured)).EnableDht);
+
+    // ---- ParseFirstMountPath (HOSTY_MOUNT_VPN) ----
+
+    [Fact]
+    public void ParseFirstMountPath_NoMount_IsNull()
+    {
+        Assert.Null(TorrentEngineSettings.ParseFirstMountPath(null));
+        Assert.Null(TorrentEngineSettings.ParseFirstMountPath("   "));
+        Assert.Null(TorrentEngineSettings.ParseFirstMountPath("profiles="));
+    }
+
+    [Fact]
+    public void ParseFirstMountPath_TakesTheFirstBindingsPath()
+    {
+        Assert.Equal(Path.GetFullPath("/mnt/vpn/profiles"), TorrentEngineSettings.ParseFirstMountPath("profiles=/mnt/vpn/profiles"));
+        Assert.Equal(Path.GetFullPath("/srv/a"), TorrentEngineSettings.ParseFirstMountPath("a=/srv/a,b=/srv/b"));
+        // Split on the first '=' only; a bare path (older Core) is accepted as-is.
+        Assert.Equal(Path.GetFullPath("/srv/a=x"), TorrentEngineSettings.ParseFirstMountPath("a=/srv/a=x"));
+        Assert.Equal(Path.GetFullPath("/srv/vpn"), TorrentEngineSettings.ParseFirstMountPath("/srv/vpn"));
+    }
+
+    [Fact]
+    public void FromConfiguration_ReadsTheVpnMountAndStateDir_WithDefaults()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["HOSTY_APP_DATA_DIR"] = "/data",
+            ["HOSTY_MOUNT_VPN"] = "profiles=/mnt/vpn/profiles",
+        }).Build();
+
+        var settings = TorrentEngineSettings.FromConfiguration(configuration, "/app");
+
+        Assert.Equal(Path.GetFullPath("/mnt/vpn/profiles"), settings.VpnProfilesDirectory);
+        Assert.Equal("/run/vpn", settings.VpnStateDir);
+        Assert.Equal(Path.Combine(Path.GetFullPath("/data"), "vpn", "active-profile"), settings.VpnSelectionFile);
+
+        var overridden = TorrentEngineSettings.FromConfiguration(
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?> { ["VPN_STATE_DIR"] = "/tmp/vpn-state" }).Build(), "/app");
+        Assert.Null(overridden.VpnProfilesDirectory);
+        Assert.Equal("/tmp/vpn-state", overridden.VpnStateDir);
+    }
 }

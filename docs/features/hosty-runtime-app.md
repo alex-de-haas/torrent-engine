@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-03
+Updated: 2026-09-03
 
 ## Description
 
@@ -29,6 +29,7 @@ A single `engine` service with one `docker` runtime profile
 | `endpoints` | `control` → the `engine` service's `control` port; the consumer-facing HTTP surface. |
 | `data` | Enabled; the `engine`'s `/app/data` is the backed-up app data dir, exposed as `HOSTY_APP_DATA_DIR`. |
 | `externalMounts.downloads` | `host-path`, `multiple`, `rw`, `required` — one host path per catalog filesystem (see [Downloads mounts](downloads-mounts.md)). |
+| `externalMounts.vpn` | `host-path`, single, `ro`, `required`, bound into `engine` — the operator's folder of OpenVPN profiles (see [VPN profiles](vpn-profiles/feature.md)). |
 | `settings` | VPN + torrent knobs (see below). |
 | `telemetry` | `{ enabled: true, sampleRatio: 0.1 }` — opt-in observability (see [Telemetry](#telemetry)). |
 | `capabilities` | `update`, `restart`, `stop`, `remove`, `backup`, `restore`, `logs`. |
@@ -49,12 +50,10 @@ environment at startup:
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `OPENVPN_CONFIG` | string (secret) | — (**required**) | The `.ovpn` contents, raw or base64. |
-| `OPENVPN_USERNAME` | string (secret) | — | Optional VPN auth username. |
-| `OPENVPN_PASSWORD` | string (secret) | — | Optional VPN auth password. |
 | `TORRENT_PORT` | number | `6881` | Raw L4 listen port (TCP + UDP). |
 | `TORRENT_MAX_DOWNLOAD_SPEED` | number | `0` | Bytes/sec, `0` = unlimited. |
 | `TORRENT_MAX_UPLOAD_SPEED` | number | `0` | Bytes/sec, `0` = unlimited. |
+| `VPN_PROFILE` | string | — | Profile to start with when none was selected through the API (the only / first one otherwise). |
 | `VPN_INTERFACE` | string | `tun0` | Tunnel interface the killswitch/monitor watch. |
 | `VPN_DNS` | string | `1.1.1.1` | Tunnel-reachable DNS resolver. |
 | `VPN_EXIT_IP_CHECK` | boolean | `true` | Best-effort exit-IP verification over the tunnel. |
@@ -64,7 +63,8 @@ environment at startup:
 
 `HOSTY_APP_DATA_DIR` (`/app/data` in the container) holds MonoTorrent's fast-resume
 state and magnet-metadata cache under a `torrent-engine/` subdirectory, so
-in-flight downloads and fetched metadata survive a restart. It is in the manifest's
+in-flight downloads and fetched metadata survive a restart, and the VPN profile
+selection under `vpn/active-profile`, so a switch made through the API does too. It is in the manifest's
 `data` targets, so Core's `backup`/`restore` cover it. Download **payload** does not
 live here — it lives on the `downloads` mounts (see
 [Downloads mounts](downloads-mounts.md)).

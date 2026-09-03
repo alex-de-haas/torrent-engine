@@ -21,17 +21,22 @@ public sealed class IdleWorkTests
             RemainingBytes: 100, TotalPieces: 0, CompletePieces: 0, PieceLengthBytes: 0,
             EtaSeconds: null, AddedAt: DateTimeOffset.UnixEpoch, ElapsedSeconds: 0);
 
-    private static VpnStatusMonitor Monitor(string vpnInterface) =>
-        new(
-            new TorrentEngineSettings
-            {
-                AppDataDir = "/tmp/te",
-                DownloadsRoots = new Dictionary<string, string>(),
-                VpnInterface = vpnInterface,
-                VpnExitCheckEnabled = false,
-            },
+    private static VpnStatusMonitor Monitor(string vpnInterface)
+    {
+        var settings = new TorrentEngineSettings
+        {
+            AppDataDir = "/tmp/te",
+            DownloadsRoots = new Dictionary<string, string>(),
+            VpnInterface = vpnInterface,
+            VpnExitCheckEnabled = false,
+        };
+        // No profiles folder and no supervisor status file: the catalog reports nothing, as outside the container.
+        return new VpnStatusMonitor(
+            settings,
             IHttpClientFactory.Imposter().Instance(),
+            new VpnProfileCatalog(settings, NullLogger<VpnProfileCatalog>.Instance),
             NullLogger<VpnStatusMonitor>.Instance);
+    }
 
     // A name no real interface carries, so the monitor reads the tunnel as down.
     private const string MissingInterface = "tun-does-not-exist";

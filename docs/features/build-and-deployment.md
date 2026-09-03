@@ -2,7 +2,7 @@
 
 Status: Implemented
 Created: 2026-07-03
-Updated: 2026-07-03
+Updated: 2026-09-03
 
 ## Description
 
@@ -75,12 +75,14 @@ hosty apps start com.haas.torrent-engine
 
 Before it is functional, configure the required settings through the Shell:
 
-- **`OPENVPN_CONFIG`** (required secret) — the `.ovpn`, raw or base64.
+- **VPN profiles mount** (required) — bind the host folder holding your `.ovpn`
+  profiles (with their `<id>.auth` credentials and certificate files) into the `vpn`
+  mount; it is mounted read-only (see [VPN profiles](vpn-profiles/feature.md)).
 - **Downloads mounts** — bind at least one host path into the `downloads` mount,
   with the same label the consumer uses for its matching catalog root (see
   [Downloads mounts](downloads-mounts.md)).
-- Optionally `OPENVPN_USERNAME`/`OPENVPN_PASSWORD` and the `TORRENT_*` / `VPN_*`
-  knobs (see [Configuration](configuration/feature.md)).
+- Optionally `VPN_PROFILE` and the `TORRENT_*` / `VPN_*` knobs (see
+  [Configuration](configuration/feature.md)).
 
 Swap `main` for a release tag in the manifest URL to pin a specific build.
 
@@ -97,7 +99,8 @@ dotnet run --project src/TorrentEngine.Api           # http://localhost:5xxx or 
 With no mount injected the engine uses a single unlabeled fallback downloads root at
 `{contentRoot}/data/downloads`, and `GET /vpn` reports the tunnel as down (there is
 no `tun0`), so the download gate keeps torrents paused unless `VPN_INTERFACE` points
-at a real up interface. This is enough to exercise the control API, snapshot
+at a real up interface. With no `HOSTY_MOUNT_VPN` there are no profiles either:
+`GET /vpn/profiles` is empty and `PUT /vpn/profile` answers `404`. This is enough to exercise the control API, snapshot
 derivation, and mount-label logic; the tunnel/killswitch require the docker runtime.
 
 ## Testing Expectations

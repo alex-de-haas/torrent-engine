@@ -28,14 +28,16 @@ See the originating design note in media-server:
 Implemented:
 - App manifest (`manifest.json`) — docker service with `NET_ADMIN` + `/dev/net/tun`
   (requires docker-host capabilities/devices support, alex-de-haas/docker-host#58),
-  `.ovpn` + credentials as secret settings, a shared downloads mount, and the control
-  port.
+  a read-only `vpn` mount for the operator's OpenVPN profiles, a shared downloads
+  mount, and the control port.
 - Container (`Dockerfile` + `docker/entrypoint.sh`) — OpenVPN bring-up with a default-deny
   **killswitch** so torrent traffic can only leave via the tunnel, while the control API
-  stays reachable on the docker bridge. `OPENVPN_CONFIG` accepts the raw `.ovpn` contents
-  **or** a base64 encoding of them; prefer base64 when setting it through a single-line
-  secret field that would otherwise flatten the newlines OpenVPN requires
-  (`base64 -w0 client.ovpn`, or `base64 -i client.ovpn | tr -d '\n'` on macOS). Once the
+  stays reachable on the docker bridge. The OpenVPN profiles are the operator's own files
+  in the read-only `vpn` mount — one `.ovpn` per profile, a `<id>.auth` beside a profile
+  that needs a username/password, certificates referenced by relative path — and several
+  can coexist: one is active, chosen at start (`VPN_PROFILE`, else the only/first one) and
+  switchable at runtime through `PUT /vpn/profile` while the killswitch stays closed (see
+  [VPN profiles](docs/features/vpn-profiles/feature.md)). Once the
   tunnel is up, DNS is pointed at a tunnel-reachable resolver (`VPN_DNS`, default `1.1.1.1`)
   so lookups don't leak outside the VPN — and don't break when the host/docker resolver is
   no longer routable through the tunnel.
@@ -71,7 +73,9 @@ GET    /downloads/{infoHash}/files
 POST   /downloads/{infoHash}/pause|resume|stop
 DELETE /downloads/{infoHash}?deleteFiles=
 GET    /events               (SSE: progress, metadata-received, completed, errored, vpn, dht)
-GET    /vpn                  { connected, tunnelInterface, tunnelAddress, exitIp, exitCountry, checkedAt }
+GET    /vpn                  { connected, tunnelInterface, tunnelAddress, exitIp, exitCountry, checkedAt, profile, pendingProfile, lastError }
+GET    /vpn/profiles         { active, profiles: [{ id, remote }] }
+PUT    /vpn/profile          { id } -> 202 + the current /vpn status (the switch runs in the background)
 GET    /dht                  { enabled, running, state, nodeCount }
 GET    /healthz
 ```
@@ -111,6 +115,11 @@ traffic egresses through the VPN — a cached outbound check over the tunnel (di
 `VPN_EXIT_IP_CHECK=false`, or point it elsewhere with `VPN_EXIT_IP_CHECK_URL`). The tunnel interface
 watched defaults to `tun0`; override it with `VPN_INTERFACE` if the tunnel comes up under a different
 name. The same status is pushed on the SSE stream as a `vpn` event whenever it changes.
+`profile` is the OpenVPN profile the container runs, `pendingProfile` the one a switch is moving to, and
+`lastError` why the last start or switch failed. `GET /vpn/profiles` lists the operator's profile folder
+(ids plus each profile's first `remote`, never the file contents) and `PUT /vpn/profile` switches — it
+records the choice and returns `202`; the entrypoint's supervisor re-keys the killswitch and restarts
+OpenVPN, and the `vpn` events show the tunnel go down and come back under the new profile.
 
 `GET /dht` reports DHT health the same way, so an *enabled but not working* DHT is visible rather than
 silent: `enabled` (the `TORRENT_ENABLE_DHT` setting), `running` (enabled **and** an engine exists — the
