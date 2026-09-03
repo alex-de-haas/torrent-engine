@@ -113,6 +113,25 @@ public sealed class VpnProfileCatalogTests : IDisposable
         Assert.Empty(missing.ListProfiles());
     }
 
+    [Fact]
+    public void ListProfiles_SkipsASymlinkLeavingTheFolder_ButListsOneInside()
+    {
+        // The list applies the same trust boundary as Lookup, so it never advertises an entry a selection rejects.
+        var outside = Path.Combine(_root, "outside");
+        Directory.CreateDirectory(outside);
+        var outsideProfile = Path.Combine(outside, "escape.ovpn");
+        File.WriteAllText(outsideProfile, "client\nremote leaked.example 1194\n");
+        File.CreateSymbolicLink(Path.Combine(_profiles, "escape.ovpn"), outsideProfile);
+
+        var inside = Put("real.ovpn", "client\nremote real.example 1194\n");
+        File.CreateSymbolicLink(Path.Combine(_profiles, "alias.ovpn"), inside);
+
+        var profiles = Catalog().ListProfiles();
+
+        Assert.Equal(["alias", "real"], profiles.Select(p => p.Id).ToArray());
+        Assert.Equal("real.example:1194", profiles.Single(p => p.Id == "alias").Remote);
+    }
+
     // ---- Lookup ----
 
     [Theory]

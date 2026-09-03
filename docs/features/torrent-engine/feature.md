@@ -180,7 +180,7 @@ The engine ships in a Native AOT binary. `ClientEngine.SaveStateAsync()` seriali
 which the trimmer cannot see, so `TorrentEngine.Api.csproj` roots the
 **`MonoTorrent.Client`** assembly (the one that actually defines `Serializer` +
 `EngineSettings` — not the `MonoTorrent` facade) with `TrimmerRootAssembly` so state
-persistence keeps working. See [Build and deployment](../build-and-deployment.md).
+persistence keeps working. See [Build and deployment](../build-and-deployment/feature.md).
 
 ## Testing Expectations
 

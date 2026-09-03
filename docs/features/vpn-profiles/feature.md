@@ -43,7 +43,14 @@ Inside the folder:
   **id is the file name without the extension**. The listing is flat (no
   subdirectories), deduplicated (`.ovpn` wins over `.conf` for the same id), and
   sorted **ordinally** (C locale) on both sides, so "first by name" means the same
-  profile to the API and to the entrypoint. A leading dot hides a file.
+  profile to the API and to the entrypoint. An id is a bare file name — no path
+  separators, no leading dot, no surrounding whitespace, no control characters — and
+  both sides apply that same rule (`VpnProfileCatalog.IsValidId`, `valid_id`).
+- **The folder is the trust boundary.** A file counts only if it lies inside the
+  folder, and a symlink only if its final target does too; the API's listing and
+  lookup share one check, and the entrypoint applies the same rule with `realpath`,
+  so the list never advertises an entry a selection rejects and nothing outside the
+  mount is ever read as a profile.
 - **Everything else is a supporting file** — certificates, keys, `tls-crypt` keys,
   credentials — and is never listed. OpenVPN runs with `--cd <folder>`, so the
   relative paths a profile references (`ca ca.crt`, `key client.key`, …) resolve
@@ -73,9 +80,12 @@ winning:
 4. the **first id in sort order**, logged as an automatic choice.
 
 An id from rule 1 or 2 that no longer matches a file falls through to the next rule
-and is reported as `lastError` (until the next switch). With no profile at all —
-an empty folder, or no mount injected in a run outside Hosty — nothing starts: the
-killswitch still goes up, the API starts, and `lastError` explains why.
+and is reported as `lastError` (until the next switch). The persisted selection
+keeps standing, though: the supervisor acts on it as soon as its file exists (see
+below), so a profile that was missing at boot and is restored later is switched to
+without another request. With no profile at all — an empty folder, or no mount
+injected in a run outside Hosty — nothing starts: the killswitch still goes up, the
+API starts, and `lastError` explains why.
 
 ## Switching at runtime
 
@@ -86,10 +96,13 @@ selection file. The response is `202 Accepted` with the current `VpnStatus`, whi
 still shows the profile that runs right now.
 
 The supervisor re-reads the selection file every **2s**. When it names a profile
-other than the running one, it performs the switch, fail-closed at every step:
+other than the running one **and that profile's file exists**, it performs the
+switch, fail-closed at every step; a selection it cannot act on (an unknown or
+malformed id) is recorded as `lastError` once, the running profile is left alone,
+and the file is re-checked quietly every tick so the switch happens the moment the
+profile appears.
 
-1. validate the id and locate the file (an unknown id is recorded as `lastError`
-   and the running profile is left alone);
+1. locate the file;
 2. publish `pendingProfile`;
 3. pin the new profile's `remote` hosts (a no-op for anything pinned at boot) and
    **re-apply the killswitch** keyed to them — the default `DROP` policies persist
@@ -99,22 +112,29 @@ other than the running one, it performs the switch, fail-closed at every step:
    tun device);
 5. start the new one, with its `<id>.auth` when present.
 
-The running profile follows the switch even when the new client fails to start:
-the firewall is already keyed for it, and the supervisor's watchdog keeps retrying
-it. The tunnel going down and coming back is an ordinary outage to the download
-gate, which pauses and resumes torrents on its own.
+`pendingProfile` stays set **until the new tunnel is up** (the interface exists), so
+the switch is observable as one — through `GET /vpn` and the `vpn` event — however
+quickly OpenVPN connects; after 60s without a tunnel it is cleared and `lastError`
+says the tunnel did not come up. The running profile follows the switch even when the
+new client fails to start: the firewall is already keyed for it, and the supervisor's
+watchdog keeps retrying it. The tunnel going down and coming back is an ordinary
+outage to the download gate, which pauses and resumes torrents on its own.
 
 The same loop is the **watchdog**: every **10s** it restarts the `openvpn` process
 if it died (checked by name, so a stale PID file cannot fool it), recording the most
 telling line of OpenVPN's log — an `AUTH_FAILED`, an options error — as
-`lastError`, and clearing that error once the tunnel is back. Errors from boot or a
-switch stay until the next switch: they explain why *this* profile runs, and the
-tunnel coming up does not change that.
+`lastError`. The tunnel coming back clears the errors it makes history — a process
+exit, a failed start, a slow connect. An error about the *selection* (a profile that
+is not in the folder) stays until the next switch: it explains why *this* profile
+runs, and the tunnel does not change that.
 
 The supervisor's view lives in **`<VPN_STATE_DIR>/status`** (default `/run/vpn`),
 `key=value` lines written whole via rename: `profile` (what runs), `pending` (a
 switch in flight), `error`, `updatedAt`. The API reads it on every status request
-and every poll.
+and on every poll of the [status monitor](../vpn-isolation/feature.md#vpn-status-monitor-vpnvpnstatusmonitorcs),
+which polls every 5s for exactly this reason. The monitor also re-verifies the exit
+IP whenever the profile (or the tunnel address) changes, and reports the exit as
+unknown rather than carrying the previous server's over to the new profile.
 
 ## What the API reports
 
@@ -147,22 +167,26 @@ two endpoints and the `vpn` event.
 xUnit, with Imposter where a dependency is faked:
 
 - `VpnProfileCatalogTests` — listing on a real temp folder (only profile files,
-  ordinal order, `.ovpn` over `.conf`, supporting and hidden files skipped, `remote`
-  extraction incl. CRLF and a missing port), id validation (separators, `..`, leading
-  dot, whitespace, unknown id, a symlink leaving the folder), status-file parsing
-  (missing, partial, garbage, empty values), and the atomic selection write.
+  ordinal order, `.ovpn` over `.conf`, supporting and hidden files skipped, a symlink
+  leaving the folder skipped while one inside is listed, `remote` extraction incl.
+  CRLF and a missing port), id validation (separators, `..`, leading dot, whitespace,
+  unknown id, a symlink leaving the folder), status-file parsing (missing, partial,
+  garbage, empty values), and the atomic selection write.
 - `VpnEndpointTests` — `GET /vpn/profiles` shape, `PUT /vpn/profile` → `400` /
   `404` (unknown, unconfigured) / `202`, the selection file written, `GET /vpn`
   carrying the supervisor trio.
 - `VpnStatusMonitorTests` — the change predicate reacts to the trio and not to
-  `checkedAt` alone.
+  `checkedAt` alone; the exit IP is re-verified on connect, on staleness, and when
+  the profile or tunnel address changes; a cached exit applies only to the same tunnel.
 - `TorrentEngineSettingsTests` — `HOSTY_MOUNT_VPN` parsing and the `VPN_STATE_DIR`
   default.
 
 The entrypoint side is validated at the runtime level, in a container with
 `NET_ADMIN` and `/dev/net/tun` and a folder holding two profiles (one with a
 `<id>.auth`): the automatic pick and tunnel-up at boot, a switch through the
-selection file (`pending` → `profile`, the killswitch re-keyed to the new `remote`,
-the credentials file copied `0600` without `\r`), an unknown id recorded as `error`
-with the running profile untouched, and the watchdog restarting a killed client and
-clearing the error once the tunnel is back.
+selection file (`pending` held until the tunnel is up, the killswitch re-keyed to the
+new `remote`, the credentials file copied `0600` without `\r`), a selection naming a
+missing profile recorded as `error` with the running profile untouched and then
+honoured when the file appears, a symlink leaving the folder not counted as a
+profile, and the watchdog restarting a killed client and clearing the error once the
+tunnel is back.

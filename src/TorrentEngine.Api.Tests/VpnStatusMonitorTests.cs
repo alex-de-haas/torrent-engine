@@ -2,7 +2,8 @@ using TorrentEngine.Api.Vpn;
 
 namespace TorrentEngine.Api.Tests;
 
-/// <summary>The monitor's change predicate — what earns an SSE <c>vpn</c> event and what does not.</summary>
+/// <summary>The monitor's decision rules: what earns an SSE <c>vpn</c> event, when the exit IP is re-verified, and
+/// when a cached exit still describes the tunnel we are on.</summary>
 public sealed class VpnStatusMonitorTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 9, 3, 10, 0, 0, TimeSpan.Zero);
@@ -39,5 +40,33 @@ public sealed class VpnStatusMonitorTests
         Assert.True(VpnStatusMonitor.HasChanged(Status(), Status(error: "openvpn exited")));
         // …and the trio going back to normal is a change too (the picker clears its "switching" state on it).
         Assert.True(VpnStatusMonitor.HasChanged(Status(pending: "de-fra"), Status()));
+    }
+
+    [Fact]
+    public void NeedsExitCheck_OnConnect_OrWhenStale()
+    {
+        Assert.True(VpnStatusMonitor.NeedsExitCheck(null, "10.8.0.2", "nl-ams", stale: false));
+        Assert.True(VpnStatusMonitor.NeedsExitCheck(Status(connected: false), "10.8.0.2", "nl-ams", stale: false));
+        Assert.True(VpnStatusMonitor.NeedsExitCheck(Status(), "10.8.0.2", "nl-ams", stale: true));
+        Assert.False(VpnStatusMonitor.NeedsExitCheck(Status(), "10.8.0.2", "nl-ams", stale: false));
+    }
+
+    [Fact]
+    public void NeedsExitCheck_WhenTheTunnelIsADifferentOne()
+    {
+        // A profile switch that completes between two polls keeps Connected true on both sides; the cached exit
+        // then belongs to the previous server and must be re-verified, not carried over for five minutes.
+        Assert.True(VpnStatusMonitor.NeedsExitCheck(Status(), "10.8.0.2", "de-fra", stale: false));
+        Assert.True(VpnStatusMonitor.NeedsExitCheck(Status(), "10.9.0.2", "nl-ams", stale: false));
+    }
+
+    [Fact]
+    public void ExitStillApplies_OnlyWhileOnTheSameTunnel()
+    {
+        Assert.True(VpnStatusMonitor.ExitStillApplies(Status(), connected: true, "10.8.0.2", "nl-ams"));
+        Assert.False(VpnStatusMonitor.ExitStillApplies(null, connected: true, "10.8.0.2", "nl-ams"));
+        Assert.False(VpnStatusMonitor.ExitStillApplies(Status(), connected: false, "10.8.0.2", "nl-ams"));
+        Assert.False(VpnStatusMonitor.ExitStillApplies(Status(), connected: true, "10.8.0.2", "de-fra"));
+        Assert.False(VpnStatusMonitor.ExitStillApplies(Status(), connected: true, "10.9.0.2", "nl-ams"));
     }
 }

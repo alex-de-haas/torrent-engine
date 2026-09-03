@@ -1,6 +1,5 @@
 # Hosty Runtime App
 
-Status: Implemented
 Created: 2026-07-03
 Updated: 2026-09-03
 
@@ -13,7 +12,7 @@ update, backup/restore, logs — and injects the environment the app reads (data
 mounts, ports, and, when enabled, telemetry). The app never hard-codes ports,
 origins, or paths. This doc is the reference for the manifest and the platform
 contract; the environment variables it produces are enumerated in
-[Configuration](configuration/feature.md).
+[Configuration](../configuration/feature.md).
 
 ## Manifest anatomy
 
@@ -28,8 +27,8 @@ A single `engine` service with one `docker` runtime profile
 | `…docker.ports` | `control` → container port `8080`, `http`. |
 | `endpoints` | `control` → the `engine` service's `control` port; the consumer-facing HTTP surface. |
 | `data` | Enabled; the `engine`'s `/app/data` is the backed-up app data dir, exposed as `HOSTY_APP_DATA_DIR`. |
-| `externalMounts.downloads` | `host-path`, `multiple`, `rw`, `required` — one host path per catalog filesystem (see [Downloads mounts](downloads-mounts.md)). |
-| `externalMounts.vpn` | `host-path`, single, `ro`, `required`, bound into `engine` — the operator's folder of OpenVPN profiles (see [VPN profiles](vpn-profiles/feature.md)). |
+| `externalMounts.downloads` | `host-path`, `multiple`, `rw`, `required` — one host path per catalog filesystem (see [Downloads mounts](../downloads-mounts.md)). |
+| `externalMounts.vpn` | `host-path`, single, `ro`, `required`, bound into `engine` — the operator's folder of OpenVPN profiles (see [VPN profiles](../vpn-profiles/feature.md)). |
 | `settings` | VPN + torrent knobs (see below). |
 | `telemetry` | `{ enabled: true, sampleRatio: 0.1 }` — opt-in observability (see [Telemetry](#telemetry)). |
 | `capabilities` | `update`, `restart`, `stop`, `remove`, `backup`, `restore`, `logs`. |
@@ -67,7 +66,7 @@ in-flight downloads and fetched metadata survive a restart, and the VPN profile
 selection under `vpn/active-profile`, so a switch made through the API does too. It is in the manifest's
 `data` targets, so Core's `backup`/`restore` cover it. Download **payload** does not
 live here — it lives on the `downloads` mounts (see
-[Downloads mounts](downloads-mounts.md)).
+[Downloads mounts](../downloads-mounts.md)).
 
 ## Endpoints and discovery
 
@@ -75,7 +74,7 @@ The app publishes one endpoint, `control`, over HTTP. A consumer declares this a
 as a cross-app dependency and is handed the resolved base URL as an environment
 variable (`HOSTY_DEPENDENCY_TORRENT_ENGINE_URL` for Media Server); it points its
 HTTP client there and never hard-codes an address. See
-[Consumer integration](consumer-integration/feature.md) for the full wiring, including the
+[Consumer integration](../consumer-integration/feature.md) for the full wiring, including the
 current non-public-endpoint caveat.
 
 ## Telemetry
@@ -97,11 +96,11 @@ Only the `docker` profile is defined, and it is the default — the VPN, killswi
 and elevated privileges only make sense inside the container. The app can still be
 run directly with `dotnet run` for local API/engine work; with no VPN and no mount
 injected it falls back to a single unlabeled downloads root under the content root
-and reports the tunnel as down (see [Build and deployment](build-and-deployment.md)).
+and reports the tunnel as down (see [Build and deployment](../build-and-deployment/feature.md)).
 
 ## Testing Expectations
 
 Manifest/platform integration (capabilities, devices, mount injection, endpoint
 discovery, backups) is validated through Core-managed runtime, not unit tests. The
 settings-resolution layer that reads this environment is unit-tested — see
-[Configuration](configuration/feature.md) and [Downloads mounts](downloads-mounts.md).
+[Configuration](../configuration/feature.md) and [Downloads mounts](../downloads-mounts.md).

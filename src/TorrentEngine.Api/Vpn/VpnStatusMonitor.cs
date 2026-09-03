@@ -19,7 +19,10 @@ public sealed class VpnStatusMonitor(
     IVpnProfileCatalog catalog,
     ILogger<VpnStatusMonitor> logger) : BackgroundService
 {
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
+    // The poll only does cheap local reads (the tunnel interface, the supervisor's status file); it is short so a
+    // profile switch — pendingProfile, then the new profile — is observed and pushed while it happens, not after.
+    // The exit-IP check keeps its own, much longer cadence below.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan ExitRefreshInterval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ExitCheckTimeout = TimeSpan.FromSeconds(8);
 
@@ -45,12 +48,13 @@ public sealed class VpnStatusMonitor(
         var supervisor = catalog.ReadSupervisorStatus();
         // Only the tunnel and supervisor reads are live here; the exit IP is reused from the last poll, so
         // report that poll's timestamp rather than now — CheckedAt must not imply the exit IP was just re-verified.
+        var exitKnown = ExitStillApplies(cached, connected, address, supervisor.Profile);
         return new VpnStatus(
             connected,
             iface,
             address,
-            connected ? cached?.ExitIp : null,
-            connected ? cached?.ExitCountry : null,
+            exitKnown ? cached!.ExitIp : null,
+            exitKnown ? cached!.ExitCountry : null,
             cached?.CheckedAt ?? DateTimeOffset.UtcNow,
             supervisor.Profile,
             supervisor.PendingProfile,
@@ -81,24 +85,26 @@ public sealed class VpnStatusMonitor(
         {
             var previous = _current;
             var (connected, iface, address) = ReadTunnel();
+            var supervisor = catalog.ReadSupervisorStatus();
 
-            var exitIp = connected ? previous?.ExitIp : null;
-            var exitCountry = connected ? previous?.ExitCountry : null;
+            // The cached exit belongs to the tunnel it was checked through; it carries over only while that is
+            // still the tunnel we are on (ExitStillApplies), else it is unknown until re-verified below.
+            var carryOver = ExitStillApplies(previous, connected, address, supervisor.Profile);
+            var exitIp = carryOver ? previous!.ExitIp : null;
+            var exitCountry = carryOver ? previous!.ExitCountry : null;
 
             if (connected && settings.VpnExitCheckEnabled)
             {
-                var justConnected = previous is not { Connected: true };
                 var stale = DateTimeOffset.UtcNow - _exitCheckedAt > ExitRefreshInterval;
                 // No `exitIp is null` retry: a failed check also stamps _exitCheckedAt, so a failure backs
                 // off for the full ExitRefreshInterval instead of hammering the IP service every poll tick.
-                if (justConnected || stale)
+                if (NeedsExitCheck(previous, address, supervisor.Profile, stale))
                 {
                     (exitIp, exitCountry) = await FetchExitAsync(cancellationToken);
                     _exitCheckedAt = DateTimeOffset.UtcNow;
                 }
             }
 
-            var supervisor = catalog.ReadSupervisorStatus();
             var status = new VpnStatus(
                 connected, iface, address, exitIp, exitCountry, DateTimeOffset.UtcNow,
                 supervisor.Profile, supervisor.PendingProfile, supervisor.LastError);
@@ -198,6 +204,27 @@ public sealed class VpnStatusMonitor(
         && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
+
+    /// <summary>When the exit IP must be (re-)verified: on connect, on the long refresh interval, and whenever the
+    /// tunnel is a different one than the cached exit was checked through — a new tunnel address, or the supervisor
+    /// now running another profile. A profile switch can complete between two polls with <c>Connected</c> true on
+    /// both sides, so connectivity alone would keep reporting the previous server's exit for the whole interval.
+    /// Internal for the tests.</summary>
+    internal static bool NeedsExitCheck(VpnStatus? previous, string? address, string? profile, bool stale) =>
+        previous is not { Connected: true }
+        || stale
+        || previous.TunnelAddress != address
+        || previous.Profile != profile;
+
+    /// <summary>Whether a cached exit IP still describes the current tunnel: connected, and neither the tunnel
+    /// address nor the supervisor's profile has changed since it was checked. Otherwise the exit is unknown, not
+    /// stale — reporting the old server's country next to the new profile would be worse than reporting nothing.
+    /// Internal for the tests.</summary>
+    internal static bool ExitStillApplies(VpnStatus? cached, bool connected, string? address, string? profile) =>
+        connected
+        && cached is not null
+        && cached.TunnelAddress == address
+        && cached.Profile == profile;
 
     /// <summary>What counts as a change worth an SSE <c>vpn</c> event: connectivity, the tunnel identity, the
     /// exit IP/country, or the supervisor's profile/pending/error trio — never <see cref="VpnStatus.CheckedAt"/>

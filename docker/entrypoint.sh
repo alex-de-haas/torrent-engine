@@ -43,19 +43,31 @@ write_status() {
     && mv "$STATUS_FILE.tmp" "$STATUS_FILE"
 }
 
-# A profile id is a bare file name: no path separators, no leading dot. Mirrors VpnProfileCatalog.IsValidId.
+# A profile id is a bare file name: no path separators, no leading dot, no surrounding whitespace, no control
+# characters. Mirrors VpnProfileCatalog.IsValidId, so the API and the supervisor accept exactly the same ids.
 valid_id() {
   case "$1" in
-    ''|.*|*/*|*\\*) return 1 ;;
+    ''|.*|*/*|*\\*|[[:space:]]*|*[[:space:]]|*[[:cntrl:]]*) return 1 ;;
   esac
   return 0
+}
+
+# The folder is the trust boundary, as in VpnProfileCatalog: a profile file counts only if its real path (symlinks
+# resolved) still lies inside the folder's real path, so a link pointing out of the mount is not a profile.
+inside_profile_dir() {
+  real="$(realpath -e "$1" 2>/dev/null)" || return 1
+  root="$(realpath -e "$PROFILE_DIR" 2>/dev/null)" || return 1
+  case "$real" in
+    "$root"/*) return 0 ;;
+  esac
+  return 1
 }
 
 # Prints the profile file for an id (`.ovpn` wins over `.conf`), or fails.
 profile_path() {
   valid_id "$1" || return 1
   for ext in ovpn conf; do
-    if [ -f "$PROFILE_DIR/$1.$ext" ]; then
+    if [ -f "$PROFILE_DIR/$1.$ext" ] && inside_profile_dir "$PROFILE_DIR/$1.$ext"; then
       printf '%s\n' "$PROFILE_DIR/$1.$ext"
       return 0
     fi
@@ -69,6 +81,7 @@ list_profile_ids() {
   [ -d "$PROFILE_DIR" ] || return 0
   for f in "$PROFILE_DIR"/*.ovpn "$PROFILE_DIR"/*.conf; do
     [ -f "$f" ] || continue
+    inside_profile_dir "$f" || continue
     id="${f##*/}"
     id="${id%.*}"
     if valid_id "$id"; then
@@ -187,7 +200,8 @@ profile_remotes() {
 }
 
 # Open the bridge to one profile's VPN endpoint(s) — just enough for OpenVPN to establish the tunnel.
-# Default udp/1194; a non-numeric port is left to OpenVPN to reject rather than fed to iptables.
+# Default udp/1194. A non-numeric port (a broken profile OpenVPN will reject on its own) falls back to 1194 for the
+# rule rather than being fed to iptables as --dport, which under set -e would abort the whole container.
 allow_vpn_endpoints() {
   profile_remotes "$1" | while read -r _ host port proto _; do
     port="${port:-1194}"
@@ -385,11 +399,24 @@ switch_profile() {
   stop_openvpn
   CURRENT="$1"
   if start_openvpn "$1"; then
+    # Stays pending until the tunnel is up (see supervise): a switch that connects within seconds must still be
+    # observable as one by the API's poll and its SSE consumers.
     STATUS_ERROR=""
+    PENDING="$1"
+    PENDING_SINCE=$ticks
   else
     STATUS_ERROR="openvpn failed to start for '$1'"
+    PENDING=""
   fi
-  write_status "$CURRENT" "" "$STATUS_ERROR"
+  write_status "$CURRENT" "$PENDING" "$STATUS_ERROR"
+}
+
+# Errors the tunnel coming back up makes history: a process exit, a failed start, a slow connect. A boot or switch
+# error about the *selection* stays — it explains why this profile runs, and the tunnel does not change that.
+clear_transient_error() {
+  case "$STATUS_ERROR" in
+    "openvpn exited:"*|"openvpn failed to start"*|"tunnel for "*) STATUS_ERROR="" ;;
+  esac
 }
 
 # One loop owns the OpenVPN process, so a watchdog restart and a switch can never race. Every 2s it acts on a
@@ -397,34 +424,66 @@ switch_profile() {
 # client — OpenVPN's own keepalive/ping-restart recovers ordinary network drops without exiting, so this only
 # covers the process itself dying. Runs in the background; the API stays PID 1 (exec) for clean shutdown.
 supervise() {
-  last_seen="$(read_selection)"
+  # A selection that could not be acted on, reported once. Seeded with a selection boot already fell back from, so
+  # its message is not repeated every tick.
+  rejected=""
+  selection="$(read_selection)"
+  if [ -n "$selection" ] && [ "$selection" != "$CURRENT" ]; then
+    rejected="$selection"
+  fi
+  PENDING=""
+  PENDING_SINCE=0
   ticks=0
   while true; do
     sleep 2
     ticks=$((ticks + 1))
+
+    # A selection naming another profile than the running one is acted on as soon as its file exists — including
+    # one whose file was missing at boot or at the time of the request and appeared later. One that cannot be
+    # acted on is reported once, then re-checked quietly.
     desired="$(read_selection)"
-    if [ "$desired" != "$last_seen" ]; then
-      last_seen="$desired"
-      if [ -n "$desired" ] && [ "$desired" != "$CURRENT" ]; then
+    if [ -n "$desired" ] && [ "$desired" != "$CURRENT" ]; then
+      if profile_path "$desired" >/dev/null; then
+        rejected=""
         switch_profile "$desired" || true
+        continue
       fi
-      continue
+      if [ "$desired" != "$rejected" ]; then
+        rejected="$desired"
+        STATUS_ERROR="selected profile '$desired' is not in the profiles folder"
+        echo "profiles: $STATUS_ERROR" >&2
+        write_status "$CURRENT" "$PENDING" "$STATUS_ERROR"
+      fi
     fi
+
+    # A switch stays pending until its tunnel is up; after 60s it is no longer "in progress", just not up.
+    if [ -n "$PENDING" ]; then
+      if ip link show "$VPN_IF" >/dev/null 2>&1; then
+        PENDING=""
+        clear_transient_error
+        write_status "$CURRENT" "" "$STATUS_ERROR"
+        echo "profiles: '$CURRENT' is up"
+      elif [ $((ticks - PENDING_SINCE)) -ge 30 ]; then
+        PENDING=""
+        [ -n "$STATUS_ERROR" ] || STATUS_ERROR="tunnel for '$CURRENT' did not come up within 60s"
+        write_status "$CURRENT" "" "$STATUS_ERROR"
+        echo "profiles: $STATUS_ERROR" >&2
+      fi
+    fi
+
     if [ -n "$CURRENT" ] && [ $((ticks % 5)) -eq 0 ]; then
       if ! pidof openvpn >/dev/null 2>&1; then
         STATUS_ERROR="openvpn exited: $(last_log_line)"
         echo "watchdog: openvpn is not running; restarting '$CURRENT' ($STATUS_ERROR)" >&2
-        write_status "$CURRENT" "" "$STATUS_ERROR"
+        write_status "$CURRENT" "$PENDING" "$STATUS_ERROR"
         start_openvpn "$CURRENT" || echo "watchdog: openvpn restart failed" >&2
-      elif ip link show "$VPN_IF" >/dev/null 2>&1; then
-        # The client is back up after an exit: that failure is history. Boot/switch errors stay until the next
-        # switch — they explain why *this* profile runs, and the tunnel coming up does not change that.
-        case "$STATUS_ERROR" in
-          "openvpn exited:"*)
-            STATUS_ERROR=""
-            write_status "$CURRENT" "" ""
-            ;;
-        esac
+      elif [ -z "$PENDING" ] && ip link show "$VPN_IF" >/dev/null 2>&1; then
+        # The client is back up after an exit: that failure is history.
+        before="$STATUS_ERROR"
+        clear_transient_error
+        if [ "$before" != "$STATUS_ERROR" ]; then
+          write_status "$CURRENT" "" ""
+        fi
       fi
     fi
   done

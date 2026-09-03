@@ -72,6 +72,8 @@ public sealed class VpnProfileCatalog(TorrentEngineSettings settings, ILogger<Vp
         // Ordinal, not culture-aware: the entrypoint's automatic pick is "first by name" in the C locale, and the
         // list a picker shows should agree with it about what comes first.
         var byId = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var fullRoot = Path.GetFullPath(root);
+        var resolvedRoot = ResolveDirectory(fullRoot);
         try
         {
             foreach (var extension in ProfileExtensions)
@@ -83,10 +85,12 @@ public sealed class VpnProfileCatalog(TorrentEngineSettings settings, ILogger<Vp
                         continue;
                     }
 
+                    // The same trust boundary as Lookup, so the list never advertises an entry a selection rejects.
                     var id = Path.GetFileNameWithoutExtension(path);
-                    if (IsValidId(id))
+                    var candidate = Path.GetFullPath(path);
+                    if (IsValidId(id) && IsWithinFolder(fullRoot, resolvedRoot, candidate, id))
                     {
-                        byId.TryAdd(id, path);
+                        byId.TryAdd(id, candidate);
                     }
                 }
             }
@@ -176,8 +180,7 @@ public sealed class VpnProfileCatalog(TorrentEngineSettings settings, ILogger<Vp
         && id.Trim().Length == id.Length
         && !id.Any(c => c is '/' or '\\' || char.IsControl(c));
 
-    /// <summary>The profile file for <paramref name="id"/>, or <c>null</c>. The folder is the trust boundary: a
-    /// candidate that resolves outside it — or a symlink whose final target does — is treated as absent.</summary>
+    /// <summary>The profile file for <paramref name="id"/>, or <c>null</c> when there is none inside the folder.</summary>
     private string? TryResolve(string id)
     {
         var root = Path.GetFullPath(settings.VpnProfilesDirectory!);
@@ -185,29 +188,40 @@ public sealed class VpnProfileCatalog(TorrentEngineSettings settings, ILogger<Vp
         foreach (var extension in ProfileExtensions)
         {
             var candidate = Path.GetFullPath(Path.Combine(root, id + extension));
-            if (!IsInside(root, candidate) || !File.Exists(candidate))
+            if (File.Exists(candidate) && IsWithinFolder(root, resolvedRoot, candidate, id))
             {
-                continue;
+                return candidate;
             }
-
-            try
-            {
-                var target = new FileInfo(candidate).ResolveLinkTarget(returnFinalTarget: true);
-                if (target is not null && !IsInside(root, target.FullName) && !IsInside(resolvedRoot, target.FullName))
-                {
-                    logger.LogWarning("VPN profile '{Id}' is a symlink leaving the profiles folder; ignoring it.", id);
-                    continue;
-                }
-            }
-            catch (IOException)
-            {
-                continue; // A dangling or unreadable link is not a profile.
-            }
-
-            return candidate;
         }
 
         return null;
+    }
+
+    /// <summary>The folder is the trust boundary: a file counts only if it lies inside it, and a symlink only if its
+    /// final target does too (the entrypoint applies the same rule with <c>realpath</c>). Shared by the listing and
+    /// the lookup, so the two can never disagree about a file.</summary>
+    private bool IsWithinFolder(string root, string resolvedRoot, string candidate, string id)
+    {
+        if (!IsInside(root, candidate))
+        {
+            return false;
+        }
+
+        try
+        {
+            var target = new FileInfo(candidate).ResolveLinkTarget(returnFinalTarget: true);
+            if (target is not null && !IsInside(root, target.FullName) && !IsInside(resolvedRoot, target.FullName))
+            {
+                logger.LogWarning("VPN profile '{Id}' is a symlink leaving the profiles folder; ignoring it.", id);
+                return false;
+            }
+
+            return true;
+        }
+        catch (IOException)
+        {
+            return false; // A dangling or unreadable link is not a profile.
+        }
     }
 
     private static string ResolveDirectory(string path)

@@ -21,7 +21,7 @@ Set by Core, not by the operator:
 | `HOSTY_MOUNT_DOWNLOADS` | engine | Comma-joined `label=path` downloads mounts, parsed into the label→root map. See [Downloads mounts](../downloads-mounts.md). |
 | `HOSTY_MOUNT_VPN` | entrypoint + engine | The `vpn` mount (`label=path`, first binding): the operator's OpenVPN profiles folder. Absent → no profiles, `GET /vpn/profiles` empty. See [VPN profiles](../vpn-profiles/feature.md). |
 | `HOSTY_PORT_TORRENT` | engine | Fallback source for the torrent listen port when `TORRENT_PORT` is unset. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` (+ other `OTEL_*`) | engine | Presence switches on OTLP export; absence = no telemetry. See [Hosty runtime app](../hosty-runtime-app.md#telemetry). |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` (+ other `OTEL_*`) | engine | Presence switches on OTLP export; absence = no telemetry. See [Hosty runtime app](../hosty-runtime-app/feature.md#telemetry). |
 | `ASPNETCORE_URLS` | entrypoint + engine | Container listen URL (`http://+:8080`); the entrypoint reads the port from here to open the killswitch for the actual control port. |
 
 ## Operator settings (manifest)

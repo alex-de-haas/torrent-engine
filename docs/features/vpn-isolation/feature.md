@@ -17,7 +17,7 @@ pause/resume downloads around outages.
 
 The operator supplies their own VPN — the engine bundles none. Running OpenVPN and
 rewriting iptables inside the container requires `NET_ADMIN` and `/dev/net/tun`,
-granted through the [manifest](../hosty-runtime-app.md).
+granted through the [manifest](../hosty-runtime-app/feature.md).
 
 > **Not yet leak-tested.** The killswitch rules are a first implementation, verified
 > by reading them rather than by observing traffic on a tunnel drop. Treat them as
@@ -120,18 +120,24 @@ every poll and every `GET /vpn`; see [VPN profiles](../vpn-profiles/feature.md))
 - **Tunnel read (cheap, local).** `connected` means the interface named by
   `VPN_INTERFACE` (default `tun0`) exists with an assigned IPv4 address — tun
   devices often report `OperationalStatus.Unknown`, so an assigned address is the
-  reliable "up" signal. Polled every **15s**.
+  reliable "up" signal. Polled every **5s** together with the supervisor's status
+  file — short so a profile switch (`pendingProfile`, then the new `profile`) is
+  pushed while it happens.
 - **Exit-IP check (best-effort, over the tunnel).** An outbound request to
   `VPN_EXIT_IP_CHECK_URL` (default `https://ipinfo.io/json`) proves traffic actually
-  egresses the VPN and reports `exitIp` / `exitCountry`. Refreshed on connect and
-  then at most every **5 minutes**; a failed check still stamps its timestamp so a
+  egresses the VPN and reports `exitIp` / `exitCountry`. Refreshed on connect,
+  whenever the tunnel is a different one (a new tunnel address, or the supervisor
+  running another profile — a switch can complete between two polls), and then at
+  most every **5 minutes**; a failed check still stamps its timestamp so a
   failure backs off for the full interval instead of hammering the service. It
   parses ipinfo/ip-api JSON shapes or a bare-IP body, with an 8s timeout. Disable it
   with `VPN_EXIT_IP_CHECK=false`, or point it elsewhere with `VPN_EXIT_IP_CHECK_URL`.
-- **`GetStatus()`** re-reads the tunnel live and combines it with the **cached**
-  exit IP, reporting the last poll's `checkedAt` (so the timestamp never implies the
-  exit IP was just re-verified). This is what `GET /vpn` serves without waiting on
-  the loop.
+- **`GetStatus()`** re-reads the tunnel and the supervisor status live and combines
+  them with the **cached** exit IP, reporting the last poll's `checkedAt` (so the
+  timestamp never implies the exit IP was just re-verified). The cached exit is used
+  only while it still describes the current tunnel — same address, same profile —
+  and is reported as unknown otherwise. This is what `GET /vpn` serves without
+  waiting on the loop.
 - **`StatusChanged`** fires only when connectivity, the tunnel address, the exit
   IP/country, or the supervisor's profile / pending profile / last error meaningfully
   changes — that is what becomes an SSE `vpn` event.
@@ -169,7 +175,7 @@ spinning on connections that cannot leave.
 
 ```mermaid
 flowchart LR
-  KS["entrypoint.sh<br/>OpenVPN + killswitch"] -->|"tun0 up/down"| MON["VpnStatusMonitor<br/>poll 15s · exit-IP 5m"]
+  KS["entrypoint.sh<br/>OpenVPN + killswitch"] -->|"tun0 up/down"| MON["VpnStatusMonitor<br/>poll 5s · exit-IP 5m"]
   MON -->|StatusChanged| GATE["VpnDownloadGate<br/>reconcile 5s"]
   MON -->|StatusChanged| BCAST["TorrentProgressBroadcaster"]
   GATE -->|"pause / resume"| ENG["MonoTorrentEngine"]
