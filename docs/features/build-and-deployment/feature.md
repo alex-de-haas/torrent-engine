@@ -1,7 +1,7 @@
 # Build and Deployment
 
 Created: 2026-07-03
-Updated: 2026-09-03
+Updated: 2026-09-07
 
 ## Description
 
@@ -50,6 +50,21 @@ serialization or runtime code-gen:
 On pushes to `main` and on pull requests: restore, `dotnet build --configuration
 Release`, and `dotnet test` the `TorrentEngine.Api.Tests` project on
 `ubuntu-latest` with the .NET 10 SDK. Superseded runs on the same ref are cancelled.
+
+## Pull request review (`.github/workflows/claude-code-review.yml`)
+
+An advisory review by the Claude Code `code-review` plugin, posted as inline comments on
+the pull request. It runs once per pull request: when the PR is opened as a non-draft, or
+when a draft is marked ready for review. Later pushes do not re-run it; convert the PR
+back to draft and mark it ready again for a fresh review. The job is skipped, not failed,
+for drafts, fork PRs, and bot-authored PRs such as Dependabot's, because GitHub withholds
+repository secrets from the latter two.
+
+It authenticates with the `CLAUDE_CODE_OAUTH_TOKEN` repository secret, a Claude
+subscription token, and posts through a Claude GitHub App token obtained via OIDC, so the
+workflow's own `GITHUB_TOKEN` stays read-only. The action refuses to run when the workflow
+file differs from the copy on `main`, so a PR that changes the workflow itself gets no
+review. The check is not required for merging.
 
 ## Publishing (`.github/workflows/publish.yml`)
 
@@ -108,3 +123,7 @@ CI runs the xUnit suite on every push/PR. The AOT publish is exercised by the
 `publish` workflow (a build failure there catches trimming/AOT regressions such as a
 missing trimmer root). Tunnel/killswitch behavior is validated at the runtime level
 (leak tests), not in CI — see [VPN isolation](../vpn-isolation/feature.md).
+
+The Claude review job runs only on eligible pull requests (non-draft, same-repository,
+human-authored) and is skipped rather than failed otherwise; it is advisory and not a
+required check.
