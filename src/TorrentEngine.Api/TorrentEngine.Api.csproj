@@ -9,7 +9,8 @@
     <!-- Publish as a native, self-contained binary (no managed runtime). JSON goes through the
          source-generated AppJsonSerializerContext; the minimal-API request delegates are emitted by
          the Request Delegate Generator (auto-enabled with PublishAot). See Api/AppJsonSerializerContext.cs. -->
-    <PublishAot>true</PublishAot>
+    <!-- Watch builds use the managed runtime; release builds retain Native AOT. -->
+    <PublishAot Condition="'$(HOSTY_DOCKER_DEVELOPMENT)' != '1'">true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>

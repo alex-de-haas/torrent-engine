@@ -1,7 +1,7 @@
 # VPN Isolation and Killswitch
 
 Created: 2026-07-03
-Updated: 2026-09-03
+Updated: 2026-09-17
 
 ## Description
 
@@ -19,9 +19,12 @@ The operator supplies their own VPN — the engine bundles none. Running OpenVPN
 rewriting iptables inside the container requires `NET_ADMIN` and `/dev/net/tun`,
 granted through the [manifest](../hosty-runtime-app/feature.md).
 
-> **Not yet leak-tested.** The killswitch rules are a first implementation, verified
-> by reading them rather than by observing traffic on a tunnel drop. Treat them as
-> unproven where a leak matters. The validation work is tracked in [plan.md](plan.md).
+IPv4 tunnel-drop acceptance passed on macOS/Docker Desktop using the source runtime,
+a controlled Debian torrent and an already-established TCP canary. A final test guard
+and packet capture on the bridge observed zero direct peer/canary egress after the
+firewall correction. IPv6-enabled networks, native Linux and telemetry egress remain
+separate acceptance work; see [plan.md](plan.md) and the
+[development runtime plan](../docker-development/plan.md).
 
 ## Container startup (`docker/entrypoint.sh`)
 
@@ -67,7 +70,10 @@ The entrypoint runs as PID 1 up to the final `exec`, in this order:
 - **Default `DROP`** on `INPUT`, `OUTPUT`, and `FORWARD` — nothing flows unless a
   rule below allows it.
 - **Loopback** in/out (includes docker's embedded DNS at `127.0.0.11`).
-- **Established/related** conntrack in both directions.
+- **Established/related input** conntrack. Outbound traffic has no blanket established
+  allowance: an existing peer connection must still use the tunnel after a route change.
+  Only established TCP **replies** from the control port to the Docker subnet may use
+  the bridge; VPN-server and telemetry traffic use their explicit allowances below.
 - **Control API in** — new TCP connections **from the docker subnet** to the
   in-container control port only. The port is read from `ASPNETCORE_URLS` (the
   container's own listen port), **not** the host-published port, so the killswitch
@@ -88,7 +94,8 @@ The entrypoint runs as PID 1 up to the final `exec`, in this order:
   (see [Observability egress](#observability-egress)).
 
 The **IPv4** rules above are mirrored by an **IPv6** default-deny (`ip6tables`):
-loopback, established/related, and `tun0` are allowed and everything else is dropped.
+loopback, established/related input, and `tun0` are allowed and everything else is dropped.
+There is no global established OUTPUT allowance for IPv6 either.
 The engine binds IPv4-only (it doesn't solicit v6 peers/DHT), so this is belt-and-
 suspenders against stray v6 leaking around the (IPv4) tunnel on an IPv6-enabled docker
 network. It is skipped when the container has no IPv6 stack (nothing to leak).
@@ -209,7 +216,14 @@ What the current rules do and do not cover:
 
 The tunnel/killswitch behavior depends on real container capabilities
 (`NET_ADMIN`, `/dev/net/tun`) and is validated at the runtime level (leak tests),
-not by unit tests. Unit-testable pieces, with xUnit and Imposter:
+not by unit tests. The companion Core opt-in VPN fixture covers verified torrent payload,
+mid-transfer tunnel loss, a pre-existing TCP connection, fresh direct connection refusal,
+bridge capture with a control-traffic positive check, and automatic recovery. A final
+POSTROUTING guard drops and counts any old tunnel-source packets that the tested OUTPUT
+rules accidentally allow onto the bridge; both that count and the captured leak count
+must be zero. This guards the test itself against the known regression.
+
+Unit-testable pieces, with xUnit and Imposter:
 
 - `VpnStatus` shape and the monitor's change-detection predicate (what counts as a
   meaningful change).

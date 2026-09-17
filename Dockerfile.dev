@@ -1,0 +1,14 @@
+# Development environment only. Source is mounted by Core at runtime.
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openvpn iptables iproute2 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /workspace
+# Warm package downloads before the runtime VPN gate; restore still runs inside the gate.
+COPY src/TorrentEngine.Api/TorrentEngine.Api.csproj src/TorrentEngine.Api/
+RUN dotnet restore src/TorrentEngine.Api/TorrentEngine.Api.csproj -p:PublishAot=false -p:NuGetAudit=false
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

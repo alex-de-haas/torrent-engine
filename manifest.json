@@ -3,9 +3,18 @@
   "id": "com.haas.torrent-engine",
   "name": "Torrent Engine",
   "description": "VPN-isolated BitTorrent engine (MonoTorrent) with an HTTP/SSE control API, for other Hosty apps to drive downloads over a dependency.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "runtimeProfiles": [
-    { "key": "docker", "type": "docker", "default": true }
+    {
+      "key": "docker",
+      "type": "docker",
+      "default": true
+    },
+    {
+      "key": "dev",
+      "type": "docker",
+      "development": true
+    }
   ],
   "defaultRuntime": "docker",
   "services": [
@@ -14,45 +23,201 @@
       "runtimes": {
         "docker": {
           "type": "docker",
-          "image": { "repository": "ghcr.io/alex-de-haas/torrent-engine", "tag": "latest" },
-          "capabilities": ["NET_ADMIN"],
-          "devices": ["/dev/net/tun"],
+          "image": {
+            "repository": "ghcr.io/alex-de-haas/torrent-engine",
+            "tag": "latest"
+          },
+          "capabilities": [
+            "NET_ADMIN"
+          ],
+          "devices": [
+            "/dev/net/tun"
+          ],
           "ports": [
-            { "key": "control", "containerPort": 8080, "protocol": "http" }
+            {
+              "key": "control",
+              "containerPort": 8080,
+              "protocol": "http"
+            }
           ]
+        },
+        "dev": {
+          "type": "docker",
+          "capabilities": [
+            "NET_ADMIN"
+          ],
+          "devices": [
+            "/dev/net/tun"
+          ],
+          "ports": [
+            {
+              "key": "control",
+              "containerPort": 8080,
+              "protocol": "http"
+            }
+          ],
+          "artifact": "source",
+          "build": {
+            "context": ".",
+            "dockerfile": "Dockerfile.dev",
+            "revision": "1"
+          },
+          "sourceMount": {
+            "path": ".",
+            "target": "/workspace",
+            "mode": "ro",
+            "caches": [
+              "src/TorrentEngine.Api/bin",
+              "src/TorrentEngine.Api/obj"
+            ]
+          },
+          "setup": "dotnet restore src/TorrentEngine.Api/TorrentEngine.Api.csproj -p:PublishAot=false -p:NuGetAudit=false --ignore-failed-sources",
+          "command": "exec dotnet watch --non-interactive --no-restore --project src/TorrentEngine.Api/TorrentEngine.Api.csproj run --no-launch-profile",
+          "environment": {
+            "DOTNET_USE_POLLING_FILE_WATCHER": "1",
+            "DOTNET_WATCH_RESTART_ON_RUDE_EDIT": "1",
+            "DOTNET_NOLOGO": "1",
+            "HOSTY_DOCKER_DEVELOPMENT": "1",
+            "NuGetAudit": "false",
+            "DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE": "1"
+          }
         }
       }
     }
   ],
   "endpoints": [
-    { "key": "control", "service": "engine", "port": "control", "protocol": "http" }
+    {
+      "key": "control",
+      "service": "engine",
+      "port": "control",
+      "protocol": "http"
+    }
   ],
   "data": {
     "enabled": true,
     "targets": [
-      { "runtime": "docker", "service": "engine", "containerPath": "/app/data", "environment": "HOSTY_APP_DATA_DIR" }
+      {
+        "runtime": "docker",
+        "service": "engine",
+        "containerPath": "/app/data",
+        "environment": "HOSTY_APP_DATA_DIR"
+      },
+      {
+        "runtime": "dev",
+        "service": "engine",
+        "containerPath": "/app/data",
+        "environment": "HOSTY_APP_DATA_DIR"
+      }
     ]
   },
   "externalMounts": {
-    "downloads": { "kind": "host-path", "multiple": true, "mode": "rw", "service": "engine", "required": true },
-    "vpn": { "kind": "host-path", "multiple": false, "mode": "ro", "service": "engine", "required": true }
+    "downloads": {
+      "kind": "host-path",
+      "multiple": true,
+      "mode": "rw",
+      "service": "engine",
+      "required": true
+    },
+    "vpn": {
+      "kind": "host-path",
+      "multiple": false,
+      "mode": "ro",
+      "service": "engine",
+      "required": true
+    }
   },
   "settings": [
-    { "key": "TORRENT_PORT", "type": "number", "default": "6881", "label": "Torrent listen port", "description": "TCP/UDP port the BitTorrent engine listens on inside the tunnel." },
-    { "key": "TORRENT_BIND_ADDRESS", "type": "string", "label": "Torrent bind address", "description": "Bind the listen and DHT endpoint to a single address (e.g. the VPN tun address). Leave unset to bind IPv4 on all interfaces." },
-    { "key": "TORRENT_ENABLE_PORT_MAPPING", "type": "boolean", "default": "false", "label": "Enable UPnP / NAT-PMP port mapping", "description": "Automatic router port mapping. Off by default and generally unnecessary behind a VPN." },
-    { "key": "TORRENT_ENABLE_DHT", "type": "boolean", "default": "true", "label": "Enable DHT", "description": "Peer discovery over the BitTorrent DHT. Turn off to rely on trackers, PEX and local peer discovery only." },
-    { "key": "TORRENT_MAX_DOWNLOAD_SPEED", "type": "number", "default": "0", "label": "Max download speed (bytes/sec)", "description": "Global download rate limit in bytes per second (0 = unlimited). Per-download limits override it." },
-    { "key": "TORRENT_MAX_UPLOAD_SPEED", "type": "number", "default": "0", "label": "Max upload speed (bytes/sec)", "description": "Global upload rate limit in bytes per second (0 = unlimited). Per-download limits override it." },
-    { "key": "TORRENT_MAX_ACTIVE", "type": "number", "default": "0", "label": "Max active torrents", "description": "Maximum number of concurrently registered torrents (0 = unlimited). Adds beyond the cap return 409." },
-    { "key": "VPN_PROFILE", "type": "string", "label": "VPN profile", "description": "Profile to use at start when none was selected through the API: a file name from the 'vpn' mount without its .ovpn/.conf extension. Leave empty to use the only profile, or the first by name." },
-    { "key": "VPN_INTERFACE", "type": "string", "default": "tun0", "label": "VPN interface", "description": "Tunnel interface the killswitch confines traffic to and the monitor watches." },
-    { "key": "VPN_DNS", "type": "string", "default": "1.1.1.1", "label": "VPN DNS resolver", "description": "Tunnel-reachable DNS resolver used once the tunnel is up, so lookups don't leak or break." },
-    { "key": "VPN_EXIT_IP_CHECK", "type": "boolean", "default": "true", "label": "Exit-IP check", "description": "Whether the monitor performs a best-effort exit-IP check (an outbound call over the tunnel)." },
-    { "key": "VPN_EXIT_IP_CHECK_URL", "type": "string", "default": "https://ipinfo.io/json", "label": "Exit-IP check URL", "description": "Endpoint for the exit-IP check. A JSON body with ip/country is preferred; a plain-text IP is accepted." }
+    {
+      "key": "TORRENT_PORT",
+      "type": "number",
+      "default": "6881",
+      "label": "Torrent listen port",
+      "description": "TCP/UDP port the BitTorrent engine listens on inside the tunnel."
+    },
+    {
+      "key": "TORRENT_BIND_ADDRESS",
+      "type": "string",
+      "label": "Torrent bind address",
+      "description": "Bind the listen and DHT endpoint to a single address (e.g. the VPN tun address). Leave unset to bind IPv4 on all interfaces."
+    },
+    {
+      "key": "TORRENT_ENABLE_PORT_MAPPING",
+      "type": "boolean",
+      "default": "false",
+      "label": "Enable UPnP / NAT-PMP port mapping",
+      "description": "Automatic router port mapping. Off by default and generally unnecessary behind a VPN."
+    },
+    {
+      "key": "TORRENT_ENABLE_DHT",
+      "type": "boolean",
+      "default": "true",
+      "label": "Enable DHT",
+      "description": "Peer discovery over the BitTorrent DHT. Turn off to rely on trackers, PEX and local peer discovery only."
+    },
+    {
+      "key": "TORRENT_MAX_DOWNLOAD_SPEED",
+      "type": "number",
+      "default": "0",
+      "label": "Max download speed (bytes/sec)",
+      "description": "Global download rate limit in bytes per second (0 = unlimited). Per-download limits override it."
+    },
+    {
+      "key": "TORRENT_MAX_UPLOAD_SPEED",
+      "type": "number",
+      "default": "0",
+      "label": "Max upload speed (bytes/sec)",
+      "description": "Global upload rate limit in bytes per second (0 = unlimited). Per-download limits override it."
+    },
+    {
+      "key": "TORRENT_MAX_ACTIVE",
+      "type": "number",
+      "default": "0",
+      "label": "Max active torrents",
+      "description": "Maximum number of concurrently registered torrents (0 = unlimited). Adds beyond the cap return 409."
+    },
+    {
+      "key": "VPN_PROFILE",
+      "type": "string",
+      "label": "VPN profile",
+      "description": "Profile to use at start when none was selected through the API: a file name from the 'vpn' mount without its .ovpn/.conf extension. Leave empty to use the only profile, or the first by name."
+    },
+    {
+      "key": "VPN_INTERFACE",
+      "type": "string",
+      "default": "tun0",
+      "label": "VPN interface",
+      "description": "Tunnel interface the killswitch confines traffic to and the monitor watches."
+    },
+    {
+      "key": "VPN_DNS",
+      "type": "string",
+      "default": "1.1.1.1",
+      "label": "VPN DNS resolver",
+      "description": "Tunnel-reachable DNS resolver used once the tunnel is up, so lookups don't leak or break."
+    },
+    {
+      "key": "VPN_EXIT_IP_CHECK",
+      "type": "boolean",
+      "default": "true",
+      "label": "Exit-IP check",
+      "description": "Whether the monitor performs a best-effort exit-IP check (an outbound call over the tunnel)."
+    },
+    {
+      "key": "VPN_EXIT_IP_CHECK_URL",
+      "type": "string",
+      "default": "https://ipinfo.io/json",
+      "label": "Exit-IP check URL",
+      "description": "Endpoint for the exit-IP check. A JSON body with ip/country is preferred; a plain-text IP is accepted."
+    }
   ],
-  "telemetry": { "enabled": true, "sampleRatio": 0.1 },
-  "capabilities": ["backup", "logs"],
+  "telemetry": {
+    "enabled": true,
+    "sampleRatio": 0.1
+  },
+  "capabilities": [
+    "backup",
+    "logs"
+  ],
   "catalogMetadata": {
     "publisher": {
       "name": "Haas",
@@ -60,7 +225,13 @@
       "email": "a.zayats@outlook.com"
     },
     "category": "Networking",
-    "tags": ["torrent", "bittorrent", "vpn", "downloads", "engine"],
+    "tags": [
+      "torrent",
+      "bittorrent",
+      "vpn",
+      "downloads",
+      "engine"
+    ],
     "icon": "assets/icon.svg",
     "license": "AGPL-3.0-only",
     "links": {
@@ -69,5 +240,10 @@
     },
     "summary": "VPN-isolated BitTorrent engine with an HTTP/SSE control API for other Hosty apps.",
     "descriptionFile": "docs/store.md"
+  },
+  "source": {
+    "type": "git",
+    "repository": "https://github.com/alex-de-haas/torrent-engine.git",
+    "branch": "main"
   }
 }

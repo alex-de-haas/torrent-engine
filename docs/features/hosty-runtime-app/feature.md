@@ -1,7 +1,7 @@
 # Hosty Runtime App
 
 Created: 2026-07-03
-Updated: 2026-09-03
+Updated: 2026-09-17
 
 ## Description
 
@@ -92,7 +92,8 @@ platform-side observability contract is documented in the Hosty Core repo
 
 ## Runtime profile
 
-Only the `docker` profile is defined, and it is the default — the VPN, killswitch,
+The `docker` profile is the default. The `dev` profile runs source inside the same Linux
+container boundary; see [Docker development](../docker-development/feature.md). The VPN, killswitch,
 and elevated privileges only make sense inside the container. The app can still be
 run directly with `dotnet run` for local API/engine work; with no VPN and no mount
 injected it falls back to a single unlabeled downloads root under the content root

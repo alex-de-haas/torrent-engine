@@ -1,8 +1,8 @@
 # VPN Isolation — Validation Hardening
 
-Status: Draft
+Status: In Progress
 Created: 2026-07-28
-Updated: 2026-07-28
+Updated: 2026-09-17
 
 ## Goal
 
@@ -14,14 +14,15 @@ looking correct.
 
 ## Target behaviour
 
-A diff against [feature.md](feature.md): none of the described rules change. What
-changes is their standing. Each claim below moves from "implemented" to "observed
-to hold", and any rule that fails its observation is fixed as part of the
-deliverable that found it.
+The owner authorized real VPN validation as part of the Docker development runtime on
+2026-09-17. IPv4 acceptance exposed and corrected an overly broad established OUTPUT
+allowance; [feature.md](feature.md) describes the corrected rules and observed behavior.
+The remaining work verifies IPv6 isolation and actual collector delivery. Any rule that
+fails its observation is fixed as part of the deliverable that found it.
 
 ## Deliverables
 
-- [ ] **Killswitch leak test.** With a real VPN endpoint and an active download,
+- [x] **Killswitch leak test.** With a real VPN endpoint and an active download,
       drop the tunnel and confirm no peer traffic egresses the bridge. Observe the
       bridge interface directly (packet capture on `eth0`), not just the iptables
       counters — a rule can be present and still be bypassed by traffic that never
@@ -53,3 +54,12 @@ deliverable that found it.
   tunnel is up.
 - The engine's own state after a drop/restore cycle: torrents paused by the gate,
   then resumed, with no stranded entries.
+
+## IPv4 Evidence (2026-09-17)
+
+The Core-managed source-runtime test transferred and verified Debian torrent pieces through
+the real VPN, forced the tunnel down, and observed automatic pause and recovery. Before the
+fix, a protective test guard intercepted 55 packets from established connections. With the
+restricted control-reply allowance, both guard counters and eth0 capture reported zero leaked
+packets; captured control API traffic confirmed the observer was active. The source/dev image
+was verified; this does not claim deployment to the installed production image or IPv6 coverage.

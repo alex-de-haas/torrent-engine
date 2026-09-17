@@ -11,8 +11,8 @@
 # path. One profile is active at a time. The API records a switch in the app-data selection file and
 # the supervisor loop below performs it; the supervisor's view flows back through $VPN_STATE_DIR/status.
 #
-# NOTE: first cut. Validate with real leak tests (kill the tunnel; confirm no peer traffic
-# egresses the bridge) before trusting it for privacy-sensitive use.
+# Runtime acceptance covers IPv4 tunnel loss, including already-established peer connections.
+# IPv6-enabled networks and provider-specific behavior require separate acceptance.
 set -eu
 
 VPN_IF="${VPN_INTERFACE:-tun0}"
@@ -238,19 +238,22 @@ pin_all_remotes() {
 # tunnel, the active profile's VPN endpoint(s) on the bridge ($1, optional), and the telemetry collector.
 # Re-applied on a profile switch: the policies persist across the flush, so there is no leak window.
 apply_killswitch() {
-  iptables -F
-  iptables -X 2>/dev/null || true
   iptables -P INPUT DROP
   iptables -P OUTPUT DROP
   iptables -P FORWARD DROP
+  iptables -F
+  iptables -X 2>/dev/null || true
 
   # Loopback (includes docker's embedded DNS at 127.0.0.11).
   iptables -A INPUT -i lo -j ACCEPT
   iptables -A OUTPUT -o lo -j ACCEPT
 
-  # Keep established/related flowing both ways.
+  # Replies may arrive, but outbound peer connections must still match the tunnel
+  # interface after route changes. A global ESTABLISHED OUTPUT rule leaks old
+  # connections onto the bridge when the tunnel disappears.
   iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  iptables -A OUTPUT -o "$LAN_IF" -d "$LAN_CIDR" -p tcp --sport "$CONTROL_PORT" \
+    -m conntrack --ctstate ESTABLISHED --ctdir REPLY -j ACCEPT
 
   # Control API: accept new connections from the docker subnet to the control port only.
   iptables -A INPUT -i "$LAN_IF" -s "$LAN_CIDR" -p tcp --dport "$CONTROL_PORT" -j ACCEPT
@@ -313,7 +316,6 @@ apply_ip6_killswitch() {
   ip6tables -A INPUT -i lo -j ACCEPT || true
   ip6tables -A OUTPUT -o lo -j ACCEPT || true
   ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true
-  ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT || true
   # Allow the tunnel in case it is itself v6-capable; everything else v6 stays dropped.
   ip6tables -A OUTPUT -o "$VPN_IF" -j ACCEPT || true
   ip6tables -A INPUT -i "$VPN_IF" -j ACCEPT || true
@@ -540,4 +542,8 @@ fi
 
 supervise &
 
+# Development supplies CMD after the same VPN and firewall initialization as production.
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
 exec /app/TorrentEngine.Api
