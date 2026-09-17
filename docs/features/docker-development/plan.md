@@ -33,6 +33,8 @@ the entrypoint now restricts bridge replies to the control API instead of permit
 established connections. No production container was modified. IPv6-enabled network and
 telemetry egress acceptance remain tracked in the VPN isolation plan.
 
-The owner requested paired PRs before remaining platform acceptance and intends to test the
-Windows host. Merge/release Hosty Core 0.104.0 before adopting this manifest: older Core versions
+The owner requested paired PRs before remaining platform acceptance and explicitly authorized
+resolving review comments and merging on 2026-09-17, with Windows operator acceptance afterward.
+This owner-approved exception allows the feature PR to merge while these acceptance deliverables
+remain unchecked; it does not claim that Windows or native Linux verification passed. Merge/release Hosty Core 0.104.0 before adopting this manifest: older Core versions
 do not understand its Docker source recipe. The remaining checks are not claimed as completed.

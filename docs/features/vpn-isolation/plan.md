@@ -36,15 +36,21 @@ fails its observation is fixed as part of the deliverable that found it.
 - [ ] Fold whatever the tests reveal back into `docker/entrypoint.sh` and
       [feature.md](feature.md).
 
-## Open questions
+## Scope And Verification Decisions
 
-- **Should the leak test run in CI?** It needs a reachable VPN endpoint plus
-  `NET_ADMIN` and `/dev/net/tun` in the runner. The alternative is a documented
-  manual gate before a privacy-sensitive release. Undecided — the CI route may not
-  be worth its setup cost for a single-operator app.
-- **Are multi-homed hosts and a v6-only `remote` in scope?** Both are currently
-  documented limitations rather than bugs (see feature.md). Supporting them means
-  the entrypoint can no longer assume one default-route bridge interface.
+The owner approved implementing Docker development and real VPN validation in chat, supplied
+and enabled the VPN for the test, and authorized review fixes and merge on 2026-09-17. The
+transition to In Progress records that authorized IPv4 validation, not approval of new network
+support. The remaining IPv6 and collector checks stay explicit deliverables; merge does not
+mark them complete.
+
+- The implemented leak test is opt-in operator acceptance through the Core-managed fixture.
+  It requires an authorized VPN folder and legal test torrent. It is not part of unattended CI;
+  ordinary unit/build checks need no VPN credentials. This reflects the implemented verification
+  method, rather than a new requirement to provision VPN secrets in CI.
+- Multi-homed hosts and IPv6-only VPN remotes remain documented limitations, outside this
+  implementation. The pending IPv6 leak test checks default-deny behavior on an IPv6-enabled
+  Docker network; it does not expand supported VPN remote/address configurations.
 
 ## Verification
 
