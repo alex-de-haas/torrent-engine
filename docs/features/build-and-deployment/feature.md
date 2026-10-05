@@ -1,7 +1,10 @@
-# Build and Deployment
+---
+created: 2026-07-03
+updated: 2026-09-08
+summary: The Native AOT container image, its entrypoint, CI and multi-arch publishing, and local development.
+---
 
-Created: 2026-07-03
-Updated: 2026-09-08
+# Build and Deployment
 
 ## Description
 
@@ -103,7 +106,7 @@ Before it is functional, configure the required settings through the Shell:
   mount; it is mounted read-only (see [VPN profiles](../vpn-profiles/feature.md)).
 - **Downloads mounts** — bind at least one host path into the `downloads` mount,
   with the same label the consumer uses for its matching catalog root (see
-  [Downloads mounts](../downloads-mounts.md)).
+  [Downloads mounts](../downloads-mounts/feature.md)).
 - Optionally `VPN_PROFILE` and the `TORRENT_*` / `VPN_*` knobs (see
   [Configuration](../configuration/feature.md)).
 

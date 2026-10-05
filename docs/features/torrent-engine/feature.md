@@ -1,7 +1,10 @@
-# Torrent Engine
+---
+created: 2026-07-03
+updated: 2026-08-14
+summary: The MonoTorrent ClientEngine wrapper, its settings, lifecycle, event mapping and snapshot derivation.
+---
 
-Created: 2026-07-03
-Updated: 2026-08-14
+# Torrent Engine
 
 ## Description
 

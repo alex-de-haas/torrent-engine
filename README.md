@@ -17,11 +17,11 @@ Full documentation lives in [`docs/`](docs/root.md) — start at
 [`docs/root.md`](docs/root.md) for the architecture overview, then the per-subsystem
 feature docs ([control API](docs/features/control-api/feature.md),
 [VPN isolation](docs/features/vpn-isolation/feature.md),
-[downloads mounts](docs/features/downloads-mounts.md),
+[downloads mounts](docs/features/downloads-mounts/feature.md),
 [consumer integration](docs/features/consumer-integration/feature.md), and more).
 
-See the originating design note in media-server:
-`docs/ideas/torrent-engine-app.md`.
+Media Server is the reference consumer; its side of the integration is described in its
+`docs/features/torrents-and-organizer/feature.md`.
 
 ## Status
 
@@ -60,7 +60,7 @@ TODO (next chunks):
 - Leak-test the killswitch in a real VPN environment (see Open questions).
 - Secure cross-app calling — the control endpoint is non-public and unauthenticated; caller
   authentication waits on the platform cross-app auth mechanism (peer introspection of the
-  app service token, proposed in the Hosty repo as `docs/ideas/cross-app-auth.md`). The
+  app service token, proposed in the Hosty repo as `docs/features/cross-app-auth/plan.md`). The
   interim `CONTROL_API_TOKEN` shared secret was removed unused in 0.5.0 (see Open questions).
 
 ## Control API
@@ -177,7 +177,7 @@ platform repo (not this one).
   Hosty cross-app `dependencies` today resolve a *public*, host-reachable endpoint. Reaching
   a non-public endpoint across containers needs the planned shared cross-app docker network
   (and, for real multi-tenant use, the Hosty app-identity token mechanism — proposed as peer
-  introspection of the app service token, `docs/ideas/cross-app-auth.md` in the Hosty repo).
+  introspection of the app service token, `docs/features/cross-app-auth/plan.md` in the Hosty repo).
   An interim `CONTROL_API_TOKEN` shared secret existed through 0.4.x but was removed unused
   in 0.5.0: no consumer ever sent it, so enabling it could only break the one integration
   that exists. The API is open, assuming a trusted single-tenant deployment.

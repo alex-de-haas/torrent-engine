@@ -1,8 +1,10 @@
-# Downloads Mounts and Zero-Copy Hand-off
+---
+created: 2026-07-03
+updated: 2026-10-05
+summary: Labelled downloads mounts route each download onto the consumer's filesystem so the hand-off is a zero-copy move.
+---
 
-Status: Implemented
-Created: 2026-07-03
-Updated: 2026-07-03
+# Downloads Mounts and Zero-Copy Hand-off
 
 ## Description
 

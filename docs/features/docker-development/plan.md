@@ -1,8 +1,11 @@
-# Docker Development Runtime
+---
+status: In Progress
+created: 2026-09-17
+updated: 2026-09-17
+summary: Remaining validation of the Docker development runtime inside the existing VPN boundary.
+---
 
-Status: In Progress
-Created: 2026-09-17
-Updated: 2026-09-17
+# Docker Development Runtime
 
 ## Goal
 
@@ -10,13 +13,13 @@ Run editable Torrent Engine source inside the existing VPN boundary, using Hosty
 
 ## Deliverables
 
-- [x] Add the SDK development environment and source-mounted dev profile, preserving production defaults.
-- [x] Run the development command only after the existing VPN/firewall entrypoint initialization.
-- [x] Validate the manifest through Core 0.104.0, build the SDK environment, and verify source execution/reload with the default-deny firewall and no VPN.
-- [x] Verify a controlled torrent transfer through a working VPN, isolation for fresh and established connections on tunnel loss, and automatic transfer recovery.
-- [x] Document the implemented profile and regenerate the index.
-- [x] Prepare the companion changes for review alongside Hosty Core support.
-- [ ] Record Windows runtime acceptance; native Linux remains unverified without an available host.
+- [x] D1. Add the SDK development environment and source-mounted dev profile, preserving production defaults.
+- [x] D2. Run the development command only after the existing VPN/firewall entrypoint initialization.
+- [x] D3. Validate the manifest through Core 0.104.0, build the SDK environment, and verify source execution/reload with the default-deny firewall and no VPN.
+- [x] D4. Verify a controlled torrent transfer through a working VPN, isolation for fresh and established connections on tunnel loss, and automatic transfer recovery.
+- [x] D5. Document the implemented profile and regenerate the index.
+- [x] D6. Prepare the companion changes for review alongside Hosty Core support.
+- [ ] D7. Record Windows runtime acceptance; native Linux remains unverified without an available host.
 
 ## Verification
 

@@ -1,7 +1,10 @@
-# Hosty Runtime App
+---
+created: 2026-07-03
+updated: 2026-09-17
+summary: The Hosty manifest, runtime profiles, capabilities and devices, settings, app data and telemetry.
+---
 
-Created: 2026-07-03
-Updated: 2026-09-17
+# Hosty Runtime App
 
 ## Description
 
@@ -27,7 +30,7 @@ A single `engine` service with one `docker` runtime profile
 | `…docker.ports` | `control` → container port `8080`, `http`. |
 | `endpoints` | `control` → the `engine` service's `control` port; the consumer-facing HTTP surface. |
 | `data` | Enabled; the `engine`'s `/app/data` is the backed-up app data dir, exposed as `HOSTY_APP_DATA_DIR`. |
-| `externalMounts.downloads` | `host-path`, `multiple`, `rw`, `required` — one host path per catalog filesystem (see [Downloads mounts](../downloads-mounts.md)). |
+| `externalMounts.downloads` | `host-path`, `multiple`, `rw`, `required` — one host path per catalog filesystem (see [Downloads mounts](../downloads-mounts/feature.md)). |
 | `externalMounts.vpn` | `host-path`, single, `ro`, `required`, bound into `engine` — the operator's folder of OpenVPN profiles (see [VPN profiles](../vpn-profiles/feature.md)). |
 | `settings` | VPN + torrent knobs (see below). |
 | `telemetry` | `{ enabled: true, sampleRatio: 0.1 }` — opt-in observability (see [Telemetry](#telemetry)). |
@@ -66,7 +69,7 @@ in-flight downloads and fetched metadata survive a restart, and the VPN profile
 selection under `vpn/active-profile`, so a switch made through the API does too. It is in the manifest's
 `data` targets, so Core's `backup`/`restore` cover it. Download **payload** does not
 live here — it lives on the `downloads` mounts (see
-[Downloads mounts](../downloads-mounts.md)).
+[Downloads mounts](../downloads-mounts/feature.md)).
 
 ## Endpoints and discovery
 
@@ -104,4 +107,4 @@ and reports the tunnel as down (see [Build and deployment](../build-and-deployme
 Manifest/platform integration (capabilities, devices, mount injection, endpoint
 discovery, backups) is validated through Core-managed runtime, not unit tests. The
 settings-resolution layer that reads this environment is unit-tested — see
-[Configuration](../configuration/feature.md) and [Downloads mounts](../downloads-mounts.md).
+[Configuration](../configuration/feature.md) and [Downloads mounts](../downloads-mounts/feature.md).

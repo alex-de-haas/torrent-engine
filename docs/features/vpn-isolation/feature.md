@@ -1,7 +1,10 @@
-# VPN Isolation and Killswitch
+---
+created: 2026-07-03
+updated: 2026-09-17
+summary: OpenVPN bring-up behind a default-deny iptables killswitch, DNS routing, the status monitor and the download gate.
+---
 
-Created: 2026-07-03
-Updated: 2026-09-17
+# VPN Isolation and Killswitch
 
 ## Description
 

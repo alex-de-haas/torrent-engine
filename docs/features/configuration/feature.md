@@ -1,7 +1,10 @@
-# Configuration
+---
+created: 2026-07-03
+updated: 2026-09-03
+summary: The environment-variable reference for the engine, the VPN monitor and the tunnel entrypoint.
+---
 
-Created: 2026-07-03
-Updated: 2026-09-03
+# Configuration
 
 ## Description
 
@@ -18,7 +21,7 @@ Set by Core, not by the operator:
 | Variable | Read by | Purpose |
 | --- | --- | --- |
 | `HOSTY_APP_DATA_DIR` | entrypoint + engine | App data dir; fast-resume + magnet-metadata cache live under `torrent-engine/`, the VPN profile selection under `vpn/active-profile`. Falls back to `{contentRoot}/data` when unset. |
-| `HOSTY_MOUNT_DOWNLOADS` | engine | Comma-joined `label=path` downloads mounts, parsed into the label→root map. See [Downloads mounts](../downloads-mounts.md). |
+| `HOSTY_MOUNT_DOWNLOADS` | engine | Comma-joined `label=path` downloads mounts, parsed into the label→root map. See [Downloads mounts](../downloads-mounts/feature.md). |
 | `HOSTY_MOUNT_VPN` | entrypoint + engine | The `vpn` mount (`label=path`, first binding): the operator's OpenVPN profiles folder. Absent → no profiles, `GET /vpn/profiles` empty. See [VPN profiles](../vpn-profiles/feature.md). |
 | `HOSTY_PORT_TORRENT` | engine | Fallback source for the torrent listen port when `TORRENT_PORT` is unset. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` (+ other `OTEL_*`) | engine | Presence switches on OTLP export; absence = no telemetry. See [Hosty runtime app](../hosty-runtime-app/feature.md#telemetry). |
@@ -70,5 +73,5 @@ the profile that needs them.
 `TorrentEngineSettingsTests` (xUnit) cover the resolution rules: port precedence
 (`TORRENT_PORT` over `HOSTY_PORT_TORRENT` over default), the boolean/int fallbacks,
 the downloads-mount parsing (delegated to the cases in
-[Downloads mounts](../downloads-mounts.md)), and the `HOSTY_MOUNT_VPN` /
+[Downloads mounts](../downloads-mounts/feature.md)), and the `HOSTY_MOUNT_VPN` /
 `VPN_STATE_DIR` resolution.

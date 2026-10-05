@@ -1,7 +1,10 @@
-# Control API
+---
+created: 2026-07-03
+updated: 2026-10-05
+summary: The HTTP control API and SSE event stream through which consumers drive downloads and the VPN.
+---
 
-Created: 2026-07-03
-Updated: 2026-09-03
+# Control API
 
 ## Description
 
@@ -17,7 +20,7 @@ The API is stateless per request. It is unauthenticated (the endpoint is
 non-public; see [Consumer integration](../consumer-integration/feature.md)); caller
 authentication is deferred to the platform's cross-app auth mechanism — peer
 introspection of the app service token, proposed in the Hosty repo as
-`docs/ideas/cross-app-auth.md`. An interim `CONTROL_API_TOKEN` shared-secret check
+`docs/features/cross-app-auth/plan.md`. An interim `CONTROL_API_TOKEN` shared-secret check
 existed through 0.4.x and was removed unused in 0.5.0 (no consumer ever sent the
 `X-Api-Token` header, so enabling it could only 401 the one integration that
 exists). All JSON is
@@ -56,7 +59,7 @@ Body (`AddDownloadRequest`); provide **exactly one** of `magnet` / `torrentBase6
 | --- | --- | --- |
 | `magnet` | string? | Magnet URI. Mutually exclusive with `torrentBase64`. |
 | `torrentBase64` | string? | A `.torrent` file, base64-encoded. |
-| `mountLabel` | string? | Selects the downloads mount a relative `savePath` resolves against. Required when several mounts are configured; optional with exactly one. See [Downloads mounts](../downloads-mounts.md). |
+| `mountLabel` | string? | Selects the downloads mount a relative `savePath` resolves against. Required when several mounts are configured; optional with exactly one. See [Downloads mounts](../downloads-mounts/feature.md). |
 | `savePath` | string? | Save directory relative to the selected mount root. Omitted → the mount root itself. An absolute path or `../` traversal outside the root is a `400`. |
 | `maxDownloadRate` | int? | Bytes/sec, `0` = unlimited. Falls back to the engine default (`TORRENT_MAX_DOWNLOAD_SPEED`) when omitted. Negative → `400`. |
 | `maxUploadRate` | int? | Bytes/sec, `0` = unlimited. Falls back to `TORRENT_MAX_UPLOAD_SPEED`. Negative → `400`. |

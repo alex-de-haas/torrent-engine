@@ -51,7 +51,7 @@ var app = builder.Build();
 // The control API is unauthenticated: the endpoint is non-public and the deployment model is a
 // trusted single-tenant host. Caller authentication is deferred to the platform's cross-app auth
 // mechanism (peer introspection of the app service token, proposed in the Hosty repo as
-// docs/ideas/cross-app-auth.md); the interim CONTROL_API_TOKEN shared secret was removed unused.
+// docs/features/cross-app-auth/plan.md); the interim CONTROL_API_TOKEN shared secret was removed unused.
 
 // Liveness — also used by a consumer to gate readiness while the VPN tunnel comes up.
 app.MapGet("/healthz", () => Results.Ok(new HealthResponse("ok")));
