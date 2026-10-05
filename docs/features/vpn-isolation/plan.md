@@ -1,8 +1,11 @@
-# VPN Isolation — Validation Hardening
+---
+status: In Progress
+created: 2026-07-28
+updated: 2026-09-17
+summary: Prove the killswitch and collector allowance against a real tunnel rather than by reading the rules.
+---
 
-Status: In Progress
-Created: 2026-07-28
-Updated: 2026-09-17
+# VPN Isolation — Validation Hardening
 
 ## Goal
 
@@ -22,18 +25,18 @@ fails its observation is fixed as part of the deliverable that found it.
 
 ## Deliverables
 
-- [x] **Killswitch leak test.** With a real VPN endpoint and an active download,
+- [x] D1. **Killswitch leak test.** With a real VPN endpoint and an active download,
       drop the tunnel and confirm no peer traffic egresses the bridge. Observe the
       bridge interface directly (packet capture on `eth0`), not just the iptables
       counters — a rule can be present and still be bypassed by traffic that never
       traverses it. Cover the drop happening mid-transfer, not only before start.
-- [ ] **IPv6 leak test.** Same, on an IPv6-enabled docker network: confirm the
+- [ ] D2. **IPv6 leak test.** Same, on an IPv6-enabled docker network: confirm the
       `ip6tables` default-deny holds and the engine solicits no v6 peers or DHT.
-- [ ] **Telemetry egress validation.** With observability enabled, confirm OTLP
+- [ ] D3. **Telemetry egress validation.** With observability enabled, confirm OTLP
       exports actually arrive at the collector — after the `resolv.conf` rewrite and
       with the collector reached over the pinned `/32` bridge route. A silent drop
       here is invisible from inside the container.
-- [ ] Fold whatever the tests reveal back into `docker/entrypoint.sh` and
+- [ ] D4. Fold whatever the tests reveal back into `docker/entrypoint.sh` and
       [feature.md](feature.md).
 
 ## Scope And Verification Decisions

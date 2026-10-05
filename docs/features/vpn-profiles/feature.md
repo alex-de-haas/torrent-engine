@@ -1,7 +1,10 @@
-# VPN Profiles
+---
+created: 2026-09-03
+updated: 2026-09-03
+summary: A folder of OpenVPN profiles with one active profile, switchable at runtime without recreating the container.
+---
 
-Created: 2026-09-03
-Updated: 2026-09-03
+# VPN Profiles
 
 ## Description
 

@@ -1,7 +1,10 @@
-# Consumer Integration
+---
+created: 2026-07-03
+updated: 2026-08-14
+summary: How a consumer app declares the engine as a dependency, discovers it, shares downloads mounts and tolerates its absence.
+---
 
-Created: 2026-07-03
-Updated: 2026-08-14
+# Consumer Integration
 
 ## Description
 
@@ -31,7 +34,7 @@ The consumer wires the engine by its `control` endpoint in its own manifest:
 Core injects the resolved base URL into the consumer, named after the endpoint
 alias — for Media Server, `HOSTY_DEPENDENCY_TORRENT_ENGINE_URL`. The consumer points
 its HTTP client at that value; no address, port, or origin is hard-coded. The client
-then speaks the [Control API](control-api/feature.md): `POST /downloads` to add,
+then speaks the [Control API](../control-api/feature.md): `POST /downloads` to add,
 `GET /downloads[/{infoHash}]` to poll, the pause/resume/stop/remove verbs to
 control, and `GET /events` to consume progress and transitions as they happen.
 
@@ -44,7 +47,7 @@ the consumer then sends that label as `mountLabel` on `POST /downloads`. The eng
 resolves the relative `savePath` against the root under that label, so the download
 lands on the filesystem the consumer will move it from. The label is the only key
 shared across the two apps — Hosty configures each app's mounts independently. See
-[Downloads mounts](downloads-mounts.md) for the full contract.
+[Downloads mounts](../downloads-mounts/feature.md) for the full contract.
 
 ## Tolerating absence
 
@@ -60,9 +63,9 @@ guarantee the engine is present. A consumer should therefore degrade gracefully:
 - Gate readiness on the engine while the tunnel comes up: poll `GET /healthz`
   (liveness) and `GET /vpn` (`connected`), and hold off adding downloads until the
   tunnel is up. Seed VPN state from `GET /vpn` on connect, then track `vpn` SSE
-  events (see [VPN isolation](vpn-isolation/feature.md)).
+  events (see [VPN isolation](../vpn-isolation/feature.md)).
 - Seed DHT health the same way from `GET /dht`, then track `dht` SSE events (see
-  [DHT status](dht/feature.md)). Both the endpoint and the event are additive, so a
+  [DHT status](../dht/feature.md)). Both the endpoint and the event are additive, so a
   consumer that ignores them is unaffected.
 
 ## Re-driving off remote events
@@ -88,5 +91,5 @@ Do not expose the control port publicly.
 The cross-app wiring (dependency resolution, the injected URL, mount-label sharing)
 is validated at the Hosty runtime level on the consumer side, not by this app's unit
 tests. On the engine side, the control API and mount-label contracts consumers rely
-on are covered by [Control API](control-api/feature.md) and
-[Downloads mounts](downloads-mounts.md) tests.
+on are covered by [Control API](../control-api/feature.md) and
+[Downloads mounts](../downloads-mounts/feature.md) tests.

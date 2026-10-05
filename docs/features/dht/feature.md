@@ -1,7 +1,10 @@
-# DHT Status
+---
+created: 2026-08-14
+updated: 2026-08-14
+summary: DHT health reporting that separates a DHT that is enabled but not working from one that is off or idle.
+---
 
-Created: 2026-08-14
-Updated: 2026-08-14
+# DHT Status
 
 ## Description
 

@@ -1,7 +1,10 @@
-# Docker Development Runtime
+---
+created: 2026-09-17
+updated: 2026-09-17
+summary: The dev profile runs editable source with dotnet watch inside the VPN-isolated development container.
+---
 
-Created: 2026-09-17
-Updated: 2026-09-17
+# Docker Development Runtime
 
 ## Runtime
 
