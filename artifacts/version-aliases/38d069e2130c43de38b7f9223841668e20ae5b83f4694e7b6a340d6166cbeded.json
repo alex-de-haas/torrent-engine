@@ -1,0 +1,1 @@
+{"appId":"com.haas.torrent-engine","digest":"sha256:6e0cf457f596fe6a456f46f1b1b04a23dd3fc49a9fd094a311d89c64dfce05bc","platforms":["linux/amd64","linux/arm64"],"repository":"ghcr.io/alex-de-haas/torrent-engine","version":"0.10.0"}
