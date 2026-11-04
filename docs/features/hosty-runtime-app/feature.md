@@ -1,6 +1,6 @@
 ---
 created: 2026-07-03
-updated: 2026-09-17
+updated: 2026-11-04
 summary: The Hosty manifest, runtime profiles, capabilities and devices, settings, app data and telemetry.
 ---
 
@@ -24,7 +24,7 @@ A single `engine` service with one `docker` runtime profile
 
 | Manifest section | Value / purpose |
 | --- | --- |
-| `services[].engine.runtimes.docker.image` | `ghcr.io/alex-de-haas/torrent-engine:latest`, `pullPolicy: always`. |
+| `services[].engine.runtimes.docker.image` | `ghcr.io/alex-de-haas/torrent-engine:0.10.0`, `pullPolicy: always`. |
 | `…docker.capabilities` | `["NET_ADMIN"]` — required to run OpenVPN and rewrite iptables. |
 | `…docker.devices` | `["/dev/net/tun"]` — the TUN device the tunnel needs. |
 | `…docker.ports` | `control` → container port `8080`, `http`. |

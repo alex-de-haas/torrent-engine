@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "hosty-publisher.0.1",
+  "metadataBranch": "app-releases",
+  "sourceBranch": "main",
+  "feeds": [
+    {
+      "id": "daily",
+      "label": "Daily",
+      "policy": "validated-source",
+      "default": true
+    },
+    {
+      "id": "stable",
+      "label": "Stable",
+      "policy": "manual-promotion"
+    }
+  ],
+  "apps": [
+    {
+      "id": "com.haas.torrent-engine",
+      "manifest": "manifest.json",
+      "profiles": [
+        "docker"
+      ],
+      "sourceInputs": [
+        "manifest.json",
+        "assets",
+        "public",
+        "docs/store.md",
+        "skills"
+      ],
+      "sourceReusable": false
+    }
+  ],
+  "images": [
+    {
+      "id": "torrent-engine",
+      "appId": "com.haas.torrent-engine",
+      "services": [
+        "engine"
+      ],
+      "repository": "ghcr.io/alex-de-haas/torrent-engine",
+      "context": ".",
+      "dockerfile": "Dockerfile",
+      "inputs": [],
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "reusable": false,
+      "reuseConstraint": "Conservative rebuild until all package and operating-system inputs are immutable.",
+      "toolchain": {
+        "buildkit": "docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc",
+        "contextFormat": "hosty-build-inputs.0.1"
+      }
+    }
+  ]
+}

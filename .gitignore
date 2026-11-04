@@ -11,3 +11,8 @@ obj/
 # Local secrets / runtime
 *.ovpn
 data/
+
+# Ready-release build outputs and pinned consumer validator
+/release-plan/
+/release-artifacts/
+/.hosty-validator/
