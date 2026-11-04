@@ -3,7 +3,7 @@
   "id": "com.haas.torrent-engine",
   "name": "Torrent Engine",
   "description": "VPN-isolated BitTorrent engine (MonoTorrent) with an HTTP/SSE control API, for other Hosty apps to drive downloads over a dependency.",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "runtimeProfiles": [
     {
       "key": "docker",
@@ -25,7 +25,7 @@
           "type": "docker",
           "image": {
             "repository": "ghcr.io/alex-de-haas/torrent-engine",
-            "tag": "latest"
+            "tag": "0.10.0"
           },
           "capabilities": [
             "NET_ADMIN"

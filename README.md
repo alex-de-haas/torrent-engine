@@ -183,3 +183,5 @@ platform repo (not this one).
   that exists. The API is open, assuming a trusted single-tenant deployment.
 - **Killswitch hardening:** the iptables rules in `docker/entrypoint.sh` are a first cut
   and need validation in a real VPN environment (leak tests on tunnel drop).
+
+Ready-release publication and migration are documented in [Ready app releases](docs/features/ready-releases/feature.md).
