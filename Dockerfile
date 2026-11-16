@@ -33,7 +33,7 @@ RUN dotnet publish src/TorrentEngine.Api/TorrentEngine.Api.csproj \
 # runtime), so the image is much smaller than the aspnet base. OpenVPN provides the tunnel and iptables
 # the killswitch; the container needs NET_ADMIN and /dev/net/tun at runtime (granted via the Hosty
 # manifest's capabilities/devices).
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0 AS runtime
+FROM mcr.microsoft.com/dotnet/runtime-deps:11.0 AS runtime
 WORKDIR /app
 
 RUN apt-get update \
