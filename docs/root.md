@@ -83,7 +83,7 @@ flowchart TB
 
 Engine (`engine` service):
 
-- .NET 10 ASP.NET Core Minimal API, published as a **Native AOT** self-contained
+- .NET 11 ASP.NET Core Minimal API, published as a **Native AOT** self-contained
   binary (no managed runtime) — JSON via a source-generated serializer context and
   minimal-API delegates via the Request Delegate Generator.
 - [MonoTorrent](https://github.com/alan-turing-institute/MonoTorrent) 3.0.2 for the
