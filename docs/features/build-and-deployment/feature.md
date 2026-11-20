@@ -1,6 +1,6 @@
 ---
 created: 2026-07-03
-updated: 2026-11-04
+updated: 2026-11-20
 summary: The Native AOT container image, its entrypoint, CI and multi-arch publishing, and local development.
 ---
 
@@ -17,12 +17,12 @@ CI, image publishing, and local development.
 
 A two-stage build from the repo root:
 
-- **Build stage** (`mcr.microsoft.com/dotnet/sdk:10.0`). Native AOT compiles to a
+- **Build stage** (`mcr.microsoft.com/dotnet/sdk:11.0`). Native AOT compiles to a
   platform-native binary, so the SDK image also installs a C toolchain (`clang`) and
   `zlib` headers. The Docker build arch (`TARGETARCH`, or the SDK image's own arch
   for a plain `docker build`) is mapped to a .NET RID (`linux-x64` / `linux-arm64`),
   then `dotnet publish -c Release -r <rid>` produces the self-contained binary.
-- **Runtime stage** (`mcr.microsoft.com/dotnet/runtime-deps:10.0`). `runtime-deps`
+- **Runtime stage** (`mcr.microsoft.com/dotnet/runtime-deps:11.0`). `runtime-deps`
   carries only the native libraries an AOT binary links against (no managed runtime),
   so the image is much smaller than the aspnet base. It adds `openvpn`, `iptables`,
   and `iproute2` for the tunnel + killswitch, copies the binary and
@@ -32,6 +32,9 @@ A two-stage build from the repo root:
 
 The container needs `NET_ADMIN` and `/dev/net/tun` at runtime, granted through the
 [manifest](../hosty-runtime-app/feature.md#elevated-container-privileges).
+The base images use Ubuntu 26.04, which provides OpenVPN 2.7.
+The `linux/amd64` image requires an x86-64-v2 CPU. The .NET 11 minimum for
+`linux/arm64` remains Armv8.0-A.
 
 ## Native AOT notes
 
@@ -50,9 +53,9 @@ serialization or runtime code-gen:
 
 ## CI (`.github/workflows/ci.yml`)
 
-On pushes to `main` and on pull requests: restore, `dotnet build --configuration
-Release`, and `dotnet test` the `TorrentEngine.Api.Tests` project on
-`ubuntu-latest` with the .NET 10 SDK. Superseded runs on the same ref are cancelled.
+CI restores, builds in Release mode, and runs `TorrentEngine.Api.Tests` on
+`ubuntu-latest` with the .NET 11 SDK for pushes to `main` and pull requests.
+The AOT job publishes for `linux-x64`. Superseded runs on the same ref are cancelled.
 
 ## Pull request review (`.github/workflows/claude-code-review.yml`)
 
@@ -125,10 +128,9 @@ derivation, and mount-label logic; the tunnel/killswitch require the docker runt
 
 ## Testing Expectations
 
-CI runs the xUnit suite on every push/PR. The AOT publish is exercised by the
-`publish` workflow (a build failure there catches trimming/AOT regressions such as a
-missing trimmer root). Tunnel/killswitch behavior is validated at the runtime level
-(leak tests), not in CI — see [VPN isolation](../vpn-isolation/feature.md).
+The ready-release workflow builds the AOT images on native amd64 and arm64 runners.
+Runtime leak tests validate the tunnel and killswitch. See
+[VPN isolation](../vpn-isolation/feature.md).
 
 The Claude review job runs only on eligible pull requests (non-draft, same-repository,
 human-authored) and is skipped rather than failed otherwise; it is advisory and not a

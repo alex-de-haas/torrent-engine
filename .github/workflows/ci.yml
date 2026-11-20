@@ -22,7 +22,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: "11.0.x"
 
       - name: Restore
         run: dotnet restore src/TorrentEngine.Api/TorrentEngine.Api.csproj
@@ -44,7 +44,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: "10.0.x"
+          dotnet-version: "11.0.x"
 
       # Native AOT compiles a platform-native binary, so the runner needs a C toolchain + zlib headers.
       - name: Install AOT toolchain

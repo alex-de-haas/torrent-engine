@@ -1,6 +1,6 @@
 ---
 created: 2026-09-17
-updated: 2026-09-17
+updated: 2026-11-20
 summary: The dev profile runs editable source with dotnet watch inside the VPN-isolated development container.
 ---
 
@@ -11,7 +11,7 @@ summary: The dev profile runs editable source with dotnet watch inside the VPN-i
 The `dev` profile requires Hosty Core 0.104.0 or later. Core builds `Dockerfile.dev` into a
 locked development environment, mounts the selected checkout read-only at `/workspace`, and
 runs the source with `dotnet watch`. Separate Docker volumes hold Linux `bin` and `obj` outputs;
-the host's build outputs are not used. The image contains the .NET 10 SDK and the same OpenVPN,
+the host's build outputs are not used. The image contains the .NET 11 SDK and the same OpenVPN,
 iptables and routing tools as the production image. Restore packages are warmed while building
 the image, then restore runs again behind the runtime firewall before watch starts.
 
